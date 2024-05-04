@@ -18,5 +18,8 @@ const config: Config = {
   plugins: [
     require('daisyui')
   ],
+  daisyui: {
+    themes: ["cupcake", "bumblebee", "emerald", "lofi", "halloween", "synthwave", "retro", "cyberpunk", "valentine", "dark", "forest", "luxury", "dracula"],
+  },
 };
 export default config;
