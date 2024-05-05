@@ -1,5 +1,4 @@
-{
-    "projectsData": [
+export const projectsData = [
       {
         "name": "Chat App",
         "techStack": "React, Firebase",
@@ -50,5 +49,4 @@
         "futureIdeas": ""
       }
     ]
-  }
   
