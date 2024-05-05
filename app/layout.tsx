@@ -13,7 +13,7 @@ export default function RootLayout({
 }>) {
 
   return (
-    <html data-theme="emerald">
+    <html data-theme="forest">
       <body >{children}</body>
     </html>
   );
