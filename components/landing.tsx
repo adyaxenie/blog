@@ -9,12 +9,12 @@ const Landing = () => {
         }
     };
 
-    const scrollToSection = (sectionSelect) => {
+    const scrollToSection = (sectionSelect: string) => {
         const section = document.getElementById(sectionSelect);
         if (section) {
             section.scrollIntoView({ behavior: "smooth" });
         }
-    }
+    };    
 
     return (
         <div className="hero min-h-screen" id="landing">
