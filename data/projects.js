@@ -9,14 +9,14 @@ export const projectsData = [
       {
         "name": "Trading Bot with Machine Learning",
         "techStack": "Python, Django",
-        "description": "Web app for day trading that would be able to predict the next day's stock close price. A model is trained on the past 30 days, with the latest 5 being weighted involving training and test sets.",
+        "description": "Web app for day trading that would be able to predict the next day's stock close price using support vector regression. A model is trained on the past 30 days, with the latest 5 being weighted involving training and test sets.",
         "challenges": "Overfitting of trained models, and prediction function was complicated. Due to these factors I never put this bot into actual trading.",
         "futureIdeas": "General idea was to have a graphical interface that allows you to train and tweak your own models in the web app and apply it to a bot, as well as have backtesting to see performance."
       },
       {
         "name": "Financial Web App",
         "techStack": "Python, Flask",
-        "description": "Scrapped 500 stocks from Wikipedia, and used provided stock indicators with yfinance Python module to get basic information.",
+        "description": "Scrapped 500 stocks from Wikipedia, and used provided stock indicators with yfinance Python module to get basic information. User could search for a stock and see its information, as well as create a diversified portfolio based on their risk tolerance and goals.",
         "challenges": "Making a good looking UI/UX within the Frontend.",
         "futureIdeas": "More customizable indicators for risk management and user goals."
       },
@@ -41,12 +41,12 @@ export const projectsData = [
         "challenges": "Felt accomplished because I was able to build this within 1 hour of starting the project.",
         "futureIdeas": ""
       },
-      {
-        "name": "Type Test",
-        "techStack": "Python, Tkinter",
-        "description": "Type test GUI that grabbed short stories from an API. Users would type these stories as fast as they could and gauge their speed of typing with live words per minute.",
-        "challenges": "Some of the logic with words per minute and accuracy.",
-        "futureIdeas": ""
-      }
+      // {
+      //   "name": "Type Test",
+      //   "techStack": "Python, Tkinter",
+      //   "description": "Type test GUI that grabbed short stories from an API. Users would type these stories as fast as they could and gauge their speed of typing with live words per minute.",
+      //   "challenges": "Some of the logic with words per minute and accuracy.",
+      //   "futureIdeas": ""
+      // }
     ]
   

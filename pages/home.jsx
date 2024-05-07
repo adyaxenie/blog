@@ -2,8 +2,10 @@ import React from 'react';
 import Home from '../components/home';
 import Head from 'next/head';
 import Navbar from '../components/navbar';
-import Projects from '../components/projects';
 import Landing from '../components/landing';
+import Footer from '../components/footer';
+import About from '../components/about';
+import Timeline from '../components/timeline';
 
 export default function Index() {
   return (
@@ -14,11 +16,16 @@ export default function Index() {
       </Head>
       <Navbar />
       <Landing id="home" />
-      <div id="projects" className='h-screen'>
+      <div id="projects" className='h-full'>
         <Home />
       </div>
-      <div id="experience" className='h-screen'>
+      <div id="timeline" className='h-screen'>
+        <Timeline />
       </div>
+      <div id="about" className='h-full'>
+        <About />
+      </div>
+      <Footer />
     </>
   );
 }

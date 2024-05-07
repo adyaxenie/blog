@@ -29,10 +29,9 @@ const Landing = () => {
                     <button className="btn btn-primary" onClick={scrollToPortfolio}>View Portfolio</button>
                     <div className="flex items-center mt-20 space-x-10">
                         <a className="link" onClick={() => scrollToSection("projects")}>Projects</a>
-                        <a className="link" onClick={() => scrollToSection("education")}>Education</a>
-                        <a className="link" onClick={() => scrollToSection("experience")}>Experience</a>
-                        <a className="link" onClick={() => scrollToSection("skills")}>Skills</a>
-                        <a className="link" onClick={() => scrollToSection("awards")}>Awards</a>
+                        <a className="link" onClick={() => scrollToSection("timeline")}>Experience</a>
+                        <a className="link" onClick={() => scrollToSection("about")}>Skills</a>
+                        <a className="link" onClick={() => scrollToSection("about")}>About</a>
                     </div>
                 </div>
             </div>
