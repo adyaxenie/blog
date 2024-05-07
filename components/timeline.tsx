@@ -32,7 +32,7 @@ const Timeline = () => {
                         <div className="text-lg font-black">San Jose State University</div>
                         <div className="subheading mb-3">Bachelor of Business Administration</div>
                         <p>Concentration in Entrepreneurship</p>
-                        <p>Dean's Scholar (2022), Member of Ideas Entrepreneurial Club</p>
+                        <p>Dean&apos;s Scholar (2022), Member of Ideas Entrepreneurial Club</p>
                     </div>
                     <hr />
                 </li>

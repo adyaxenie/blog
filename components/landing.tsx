@@ -22,7 +22,7 @@ const Landing = () => {
                 <div className="max-w-md">
                     <div className="items-center">
                         <h1 className="text-5xl font-bold">Hi there,</h1>
-                        <h1 className="text-5xl font-bold">I'm Adrian.</h1>
+                        <h1 className="text-5xl font-bold">I&apos;m Adrian.</h1>
                     </div>
                     <p className="pt-6">I like to build things.</p>
                     <p className="pb-6">Current Software Developer and Product Manager</p>
