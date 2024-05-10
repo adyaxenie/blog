@@ -1,5 +1,5 @@
 "use client"
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import axios from 'axios';
 
@@ -13,7 +13,7 @@ const Blog = () => {
     setPosts(postsData);
   };
 
-  useState(() => {
+  useEffect(() => {
     fetchPosts();
   }, []);
 
@@ -21,7 +21,7 @@ const Blog = () => {
     <div>
       <h1>Blog Posts</h1>
       <ul>
-        {posts.map(post => (
+        {posts.map((post: Post) => (
           <li key={post._id}>
             <Link href={`/posts/${post._id}`}>
               {post.title}
