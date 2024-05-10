@@ -5,7 +5,7 @@ const client = new MongoClient(uri);
 
 async function connect() {
   await client.connect();
-  return client.db('blogs'); // Adjust the database name as necessary
+  return client.db('blogs');
 }
 
 export default async function handler(req, res) {
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   const posts = db.collection('posts');
 
   try {
-    const allPosts = await posts.find({}).toArray(); // Fetch all posts
+    const allPosts = await posts.find({}).toArray();
     res.status(200).json(allPosts);
   } catch (error) {
     console.error('Error fetching posts:', error);
