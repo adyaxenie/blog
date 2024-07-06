@@ -6,6 +6,7 @@ import Landing from '../components/landing';
 import Footer from '../components/footer';
 import About from '../components/about';
 import Timeline from '../components/timeline';
+import LiveProjects from '@/components/live_projects';
 
 export default function Index() {
   return (
@@ -16,6 +17,7 @@ export default function Index() {
       </Head>
       <Navbar />
       <Landing id="home" />
+      <LiveProjects />
       <div id="projects" className='h-full'>
         <Home />
       </div>
