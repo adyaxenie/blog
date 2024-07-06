@@ -1,5 +1,7 @@
 "use client"
-import React from "react";
+import React, {useEffect} from "react";
+import AOS from "aos";
+import "aos/dist/aos.css";
 
 const Landing = () => {
     const scrollToPortfolio = () => {
@@ -16,9 +18,18 @@ const Landing = () => {
         }
     };    
 
+    useEffect(() => {
+        AOS.init({
+        once: true,
+        disable: "phone",
+        duration: 700,
+        easing: "ease-out-cubic",
+        });
+      }, []);
+
     return (
-        <div className="hero min-h-screen" id="landing">
-            <div className="hero-content text-center">
+        <div className="hero min-h-full py-32" id="landing">
+            <div data-aos="fade-left-in" className="hero-content text-center">
                 <div className="max-w-md">
                     <div className="items-center">
                         <h1 className="text-5xl font-bold">Hi there,</h1>
@@ -35,7 +46,9 @@ const Landing = () => {
                     </div>
                 </div>
             </div>
+
         </div>
+
     );
 };
 
