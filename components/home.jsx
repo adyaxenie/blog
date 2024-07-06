@@ -1,5 +1,4 @@
 import React from 'react';
-import Posts from './all_posts';
 import Projects from './projects';
 
 const Home = () => {
