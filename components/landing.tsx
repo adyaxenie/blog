@@ -36,7 +36,7 @@ const Landing = () => {
                         <h1 className="text-5xl font-bold">I&apos;m Adrian.</h1>
                     </div>
                     <p className="pt-6">I like to build things.</p>
-                    <p className="pb-6">Current Software Developer and Product Manager</p>
+                    <p className="pb-6">Software Developer and Product Manager</p>
                     <button className="btn btn-primary" onClick={scrollToPortfolio}>View Portfolio</button>
                     <div className="flex items-center mt-20 space-x-10">
                         <a className="link" onClick={() => scrollToSection("projects")}>Projects</a>
