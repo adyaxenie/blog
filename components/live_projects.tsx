@@ -17,7 +17,7 @@ const LiveProjects = () => {
                 <div className='cursor-pointer' onClick={handleClick} >
                     <Image 
                         className="rounded-lg cursor-pointer bg-red-500 blur-none group-hover:blur-sm" 
-                        src="/landingpage.PNG" 
+                        src="/landingpage2.PNG" 
                         alt="SupBot" 
                         width={600} 
                         height={300}
