@@ -3,6 +3,8 @@ import { FaPython, FaAws, FaReact, FaHtml5, FaBootstrap } from 'react-icons/fa';
 import { RiTailwindCssFill } from 'react-icons/ri';
 import { SiDjango, SiScikitlearn, SiMysql } from 'react-icons/si';
 import { GrHeroku } from 'react-icons/gr';
+import { TbBrandSupabase } from 'react-icons/tb';
+import { RiNextjsLine } from 'react-icons/ri';
 
 const About = () => {
     return (
@@ -32,6 +34,8 @@ const About = () => {
                             <GrHeroku className="h-10 w-10" />
                             <SiScikitlearn className="h-10 w-10" />
                             <SiMysql className="h-10 w-10" />
+                            <TbBrandSupabase className="h-10 w-10" />
+                            <RiNextjsLine className="h-10 w-10" />
                         </div>
                     </div>
                 </div>
