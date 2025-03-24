@@ -46,7 +46,7 @@ const LiveProjects = () => {
                             <div className="w-full h-0 pb-[50%] bg-white overflow-hidden relative">
                                 <Image 
                                     className="absolute top-0 left-0 w-full h-full object-contain group-hover:blur-sm" 
-                                    src="/pdfdino.png" 
+                                    src="/pdfdino.PNG" 
                                     alt="PDF Dino"
                                     layout="fill"
                                 />
