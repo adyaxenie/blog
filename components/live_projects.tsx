@@ -12,16 +12,16 @@ const LiveProjects = () => {
     };
 
     return (
-    <div data-aos="zoom-y-in" className="flex justify-center items-center">
+    <div data-aos="zoom-y-in" className="flex justify-center items-center" id='projects'>
         <div className="w-full max-w-5xl px-5">
-            <div className="mb-4 items-center flex text-red-500">
+            <div className="mb-6 items-center flex text-white">
                 <p>Live Projects</p>
                 <span className="loading loading-ring loading-sm ml-2"></span>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="relative group">
-                    <div className="absolute -inset-1 bg-gradient-to-br from-red-500 to-purple-500 opacity-0 group-hover:opacity-50 rounded-lg blur-lg transition-opacity duration-300"></div>
+                    <div className="absolute -inset-1 bg-white opacity-0 group-hover:opacity-50 rounded-lg blur-lg transition-opacity duration-300"></div>
                     <div className="bg-white p-4 card cursor-pointer relative rounded-lg">
                         <div className="relative cursor-pointer" onClick={handleDinoClick}>
                             <div className="w-full h-0 pb-[50%] bg-white overflow-hidden relative">
@@ -33,13 +33,16 @@ const LiveProjects = () => {
                                 />
                             </div>
                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <p className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-purple-500 text-xl font-bold underline transition">Go to PDF Dino</p>
+                                <p className="text-black text-xl font-bold transition relative z-10">
+                                    Go to PDF Dino
+                                    <span className="absolute inset-0 rounded blur-md bg-white opacity-80 -z-10"></span>
+                                </p>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div className="relative group">
-                    <div className="absolute -inset-1 bg-gradient-to-br from-red-500 to-purple-500 opacity-0 group-hover:opacity-50 rounded-lg blur-lg transition-opacity duration-300"></div>
+                    <div className="absolute -inset-1 bg-white opacity-0 group-hover:opacity-50 rounded-lg blur-lg transition-opacity duration-300"></div>
                     <div className="bg-white p-4 card cursor-pointer relative rounded-lg">
                         <div className="relative cursor-pointer" onClick={handleBotClick}>
                             <div className="w-full h-0 pb-[50%] bg-white overflow-hidden relative">
@@ -51,7 +54,10 @@ const LiveProjects = () => {
                                 />
                             </div>
                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <p className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-purple-500 text-xl font-bold underline transition">Go to SupBot AI</p>
+                                <p className="text-black text-xl font-bold transition relative z-10">
+                                    Go to SupBot AI
+                                    <span className="absolute inset-0 rounded blur-md bg-white opacity-80 -z-10"></span>
+                                </p>
                             </div>
                         </div>
                     </div>

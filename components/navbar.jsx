@@ -21,7 +21,7 @@ const Navbar = () => {
             </div>
             <ul tabIndex={0} className="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow bg-base-100 rounded-box w-52">
                 <li><a onClick={() => scrollToSection("landing")}>Home</a></li>
-                <li><a onClick={() => scrollToSection("projects")}>Portfolio</a></li>
+                <li><a onClick={() => scrollToSection("projects")}>Projects</a></li>
                 <li><a onClick={() => scrollToSection("timeline")}>Experience</a></li>
                 <li><a onClick={() => scrollToSection("about")}>About</a></li>
             </ul>
