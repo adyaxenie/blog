@@ -13,7 +13,7 @@ const About = () => {
             <div className="sm:flex justify-center gap-10">
                 <div data-aos="fade-right" className="card bg-base-100 shadow-xl w-full md:w-1/3 mx-2 p-5">
                     <div className="card-body">
-                        <h2 className="card-title">About Me</h2>
+                        <h2 className="card-title">About Me (old slop stuff)</h2>
                         <p>Hi there! I&apos;m Adrian, a Software Developer and Product Manager. I like to build things that are interesting or challenging in some way.</p>
                         <p>Some of the technologies I&apos;ve recently been working with include NextJS, Supabase, and OpenAI.</p>
                         <p>Some interests of mine are going skiing during the winter and mountain biking in the summer.</p>
