@@ -14,7 +14,7 @@ const LiveProjects = () => {
     return (
     <div data-aos="zoom-y-in" className="flex justify-center items-center" id='projects'>
         <div className="w-full max-w-5xl px-5">
-            <div className="mb-6 items-center flex text-white">
+            <div className="mb-6 items-center flex text-red-500">
                 <p>Live Projects</p>
                 <span className="loading loading-ring loading-sm ml-2"></span>
             </div>
