@@ -2,22 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-.timeline-tracker {
-    position: fixed;
-    top: 50%; /* Center vertically */
-    left: 20px; /* Spacing from the left edge */
-    transform: translateY(-50%);
-    z-index: 1000; /* Ensure it's above other content */
-  }
-  
-  .timeline-dot {
-    width: 10px;
-    height: 10px;
-    background-color: gray;
-    border-radius: 50%;
-    margin-bottom: 8px;
-  }
-  
-  .timeline-dot.active {
-    background-color: rgb(8, 8, 8);
-  }
+@layer utilities {
+  .animation-delay-2000 { animation-delay: 2s; }
+  .animation-delay-4000 { animation-delay: 4s; }
+  .animate-blob { animation: blob 12s infinite; }
+}
+
+@keyframes blob {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(20px, -30px) scale(1.05); }
+  66% { transform: translate(-15px, 20px) scale(0.97); }
+}
