@@ -2,9 +2,7 @@ import React from 'react';
 
 const Timeline = () => {
     return (
-        <div data-aos="fade-up" className="justify-center items-center p-10">
-            <h1 className="divider text-6xl font-medium w-1/3 md:mx-auto py-10">Experience</h1>
-            
+        <div data-aos="fade-up" className="justify-center items-center p-10">            
             <ul className="timeline timeline-snap-icon max-md:timeline-compact timeline-vertical p-5">
             <li>
                     <hr />
