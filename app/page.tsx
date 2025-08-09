@@ -74,7 +74,7 @@ export default function Page() {
       {/* LANDING */}
       <section id="landing" className="relative pt-40 md:pt-48 pb-16 md:pb-24">
         <div className="mx-auto w-[92%] md:w-[80%] max-w-6xl">
-          <motion.div {...reveal} className="text-center">
+          <motion.div className="text-center">
             <h1 className="text-4xl md:text-6xl font-bold leading-tight">
               Hi there,
               <br className="hidden md:block" /> I&apos;m Adrian.
