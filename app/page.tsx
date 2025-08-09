@@ -80,7 +80,7 @@ export default function Page() {
               <br className="hidden md:block" /> I&apos;m Adrian.
             </h1>
             <p className="mt-5 text-base md:text-lg text-slate-600">
-              Software Developer & Product Manager — I like to build things.
+             I like to build things.
             </p>
             <div className="mt-8 flex items-center justify-center gap-3">
               <button
