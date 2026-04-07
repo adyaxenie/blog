@@ -6,8 +6,8 @@ export interface HomepageProject {
 }
 
 export const homepageProjects: HomepageProject[] = [
-  { name: "dailyglowup app", status: "Live" },
-  { name: "RL.TCG", status: "Failed" },
-  { name: "PDF Dino", status: "Live" },
-  { name: "SupBot AI", status: "Failed" },
+  { name: "dailyglowup.app", status: "Live" },
+  { name: "rltcg.com", status: "Failed" },
+  { name: "pdfdino.com", status: "Live" },
+  { name: "supbot.io", status: "Failed" },
 ];
