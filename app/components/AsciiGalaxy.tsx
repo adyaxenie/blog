@@ -229,12 +229,12 @@ export default function AsciiGalaxy({ exclusionZones = [], onGridReady }: Props)
     }
 
     // Render batched by color — minimizes ctx.fillStyle changes
-    for (const [color, chars] of colorBatch) {
+    colorBatch.forEach((chars, color) => {
       ctx.fillStyle = color;
       for (const { char, px, py } of chars) {
         ctx.fillText(char, px, py);
       }
-    }
+    });
   }, [isInExclusion]);
 
   useEffect(() => {
