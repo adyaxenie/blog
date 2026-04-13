@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from "react";
 import AsciiEarth from "@/app/components/AsciiEarth";
 import AsciiGalaxy from "@/app/components/AsciiGalaxy";
+import AsciiBlackhole from "@/app/components/AsciiBlackhole";
 import { homepageProjects } from "@/data/homepage-projects";
 import type { ExclusionZone } from "@/app/components/AsciiEarth";
 
@@ -13,7 +14,7 @@ const STATUS_COLORS: Record<string, string> = {
   Failed: "text-rose-400",
 };
 
-type Scene = "earth" | "galaxy";
+type Scene = "earth" | "galaxy" | "blackhole";
 
 // Layout in grid characters
 const CARD_WIDTH_CHARS = 36;
@@ -85,7 +86,7 @@ export default function Page() {
     };
   };
 
-  const Background = scene === "galaxy" ? AsciiGalaxy : AsciiEarth;
+  const Background = scene === "galaxy" ? AsciiGalaxy : scene === "blackhole" ? AsciiBlackhole : AsciiEarth;
 
   return (
     <div className="relative min-h-screen overflow-hidden">
@@ -93,7 +94,7 @@ export default function Page() {
 
       {/* Scene toggle */}
       <div className="fixed top-4 right-4 z-20 flex gap-2">
-        {(["earth", "galaxy"] as Scene[]).map((s) => (
+        {(["earth", "galaxy", "blackhole"] as Scene[]).map((s) => (
           <button
             key={s}
             onClick={() => setScene(s)}
@@ -146,7 +147,14 @@ export default function Page() {
                   height: ITEM_HEIGHT_CHARS * gridInfo.charHeight,
                 }}
               >
-                <span className="text-sm text-white/80">{project.name}</span>
+                <a
+                  href={project.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-white/80 hover:text-white transition-colors duration-150 hover:underline underline-offset-2"
+                >
+                  {project.name}
+                </a>
                 <span
                   className={`text-xs font-medium ${STATUS_COLORS[project.status] ?? "text-white/60"}`}
                 >
