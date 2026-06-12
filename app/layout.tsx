@@ -6,8 +6,8 @@ import SessionProvider from "./components/SessionProvider";
 import NavMenu from "./components/Login";
 
 export const metadata: Metadata = {
-  title: "Portfolio",
-  description: "My personal portfolio website",
+  title: "Adrian Axenie — Portfolio",
+  description: "Product engineer & founder. I design, build, and ship products end-to-end.",
 };
 
 export default async function RootLayout({
