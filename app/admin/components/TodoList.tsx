@@ -2,91 +2,90 @@
 
 import { useEffect, useState } from "react";
 
-type Todo = {
-  id: string;
-  text: string;
-  done: boolean;
-  source: "manual" | "claude";
-  createdAt: number;
-};
+type Todo = { id: string; text: string; done: boolean; createdAt: number };
 
-const LEGACY_STORAGE_KEY = "admin_todos";
-const MIGRATED_KEY = "admin_todos_migrated";
+const STORAGE_KEY = "admin_todos";
+
+function readLocal(): Todo[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return []; // corrupted storage — start fresh
+  }
+}
 
 export default function TodoList() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [text, setText] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function refresh() {
-    try {
-      const res = await fetch("/api/admin/todos");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setTodos(data.todos ?? []);
-      setError(null);
-    } catch {
-      setError("Couldn't load todos");
-    }
-    setLoaded(true);
-  }
+  // Synced to /api/todos when the store is reachable; otherwise this browser's
+  // localStorage keeps working as before.
+  const [synced, setSynced] = useState<boolean | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      // One-time migration of old localStorage todos into the API.
+      const local = readLocal();
       try {
-        if (!localStorage.getItem(MIGRATED_KEY)) {
-          const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-          if (raw) {
-            const legacy = JSON.parse(raw) as { text: string; done: boolean }[];
-            const open = legacy.filter((t) => t && !t.done && t.text).map((t) => t.text);
-            if (open.length > 0) {
-              await fetch("/api/admin/todos", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ tasks: open }),
-              });
-            }
+        const res = await fetch("/api/todos");
+        const json = await res.json();
+        if (cancelled) return;
+        if (json.configured) {
+          const server: Todo[] = json.todos ?? [];
+          if (server.length === 0 && local.length > 0) {
+            // First run against an empty store — migrate this browser's list.
+            setTodos(local);
+            void persist(local);
+          } else {
+            setTodos(server);
           }
-          localStorage.setItem(MIGRATED_KEY, "1");
+          setSynced(true);
+        } else {
+          setTodos(local);
+          setSynced(false);
         }
       } catch {
-        // migration is best-effort
+        if (!cancelled) {
+          setTodos(local);
+          setSynced(false);
+        }
       }
-      await refresh();
+      if (!cancelled) setLoaded(true);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  async function add(e: React.FormEvent) {
+  useEffect(() => {
+    if (loaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+  }, [todos, loaded]);
+
+  async function persist(next: Todo[]) {
+    try {
+      const res = await fetch("/api/todos", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ todos: next }),
+      });
+      setSynced(res.ok);
+    } catch {
+      setSynced(false);
+    }
+  }
+
+  function update(next: Todo[]) {
+    setTodos(next);
+    if (synced !== false) void persist(next);
+  }
+
+  function add(e: React.FormEvent) {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
+    update([{ id: crypto.randomUUID(), text: t, done: false, createdAt: Date.now() }, ...todos]);
     setText("");
-    await fetch("/api/admin/todos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: t }),
-    });
-    await refresh();
-  }
-
-  async function toggle(t: Todo) {
-    setTodos(todos.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)));
-    await fetch("/api/admin/todos", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: t.id, done: !t.done }),
-    });
-  }
-
-  async function remove(t: Todo) {
-    setTodos(todos.filter((x) => x.id !== t.id));
-    await fetch("/api/admin/todos", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: t.id }),
-    });
   }
 
   const remaining = todos.filter((t) => !t.done).length;
@@ -96,7 +95,8 @@ export default function TodoList() {
       <div className="mb-4 flex items-baseline justify-between">
         <h2 className="text-sm font-medium text-zinc-100">To do</h2>
         <span className="text-xs text-zinc-500">
-          {error ? error : `${remaining} open`}
+          {synced === false && <span className="text-amber-400/80">local only · </span>}
+          {remaining} open
         </span>
       </div>
       <form onSubmit={add} className="flex gap-2">
@@ -123,7 +123,9 @@ export default function TodoList() {
               type="checkbox"
               className="h-3.5 w-3.5 accent-emerald-500"
               checked={t.done}
-              onChange={() => toggle(t)}
+              onChange={() =>
+                update(todos.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)))
+              }
             />
             <span
               className={`flex-1 text-sm ${
@@ -132,21 +134,16 @@ export default function TodoList() {
             >
               {t.text}
             </span>
-            {t.source === "claude" && (
-              <span className="rounded border border-indigo-900 bg-indigo-950/60 px-1.5 py-0.5 text-[10px] text-indigo-400">
-                claude
-              </span>
-            )}
             <button
               className="text-xs text-zinc-600 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
-              onClick={() => remove(t)}
+              onClick={() => update(todos.filter((x) => x.id !== t.id))}
               aria-label="Delete"
             >
               ✕
             </button>
           </li>
         ))}
-        {loaded && !error && todos.length === 0 && (
+        {loaded && todos.length === 0 && (
           <li className="px-2 py-1.5 text-sm text-zinc-600">Nothing yet — add your first task.</li>
         )}
       </ul>
