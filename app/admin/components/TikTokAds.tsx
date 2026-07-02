@@ -28,6 +28,7 @@ type Verdict = "scale" | "watch" | "review" | "kill" | "needs data";
 type Creative = {
   id: string;
   name: string;
+  campaign: string;
   type: "test" | "main";
   lastActive: string;
   spend: number;
@@ -200,6 +201,9 @@ export function TikTokAdsTab({ days }: { days: number }) {
                       <p className="truncate text-zinc-200" title={c.name}>
                         {c.name}
                       </p>
+                      <div className="mt-0.5 truncate text-[10px] text-zinc-500" title={c.campaign}>
+                        {c.campaign}
+                      </div>
                       <div className="mt-1 flex items-center gap-2">
                         <span className="text-[10px] uppercase tracking-wider text-zinc-600">
                           {c.type === "test" ? "ABO test" : "Main"}

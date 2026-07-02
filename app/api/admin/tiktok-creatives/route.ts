@@ -63,6 +63,7 @@ type Verdict = "scale" | "watch" | "review" | "kill" | "needs data";
 type Creative = {
   id: string;
   name: string;
+  campaign: string;
   type: "test" | "main";
   spend: number;
   spendShare: number;
@@ -253,6 +254,7 @@ export async function GET(req: NextRequest) {
     // Aggregate per ad_id + resolved title. Watch time is play-weighted.
     type Agg = {
       name: string;
+      campaign: string;
       type: "test" | "main";
       lastActive: string; // latest UTC day with spend
       spend: number;
@@ -290,6 +292,7 @@ export async function GET(req: NextRequest) {
 
       const a = byCreative.get(key) ?? {
         name,
+        campaign: String(r.campaign ?? "").trim() || "(unknown campaign)",
         type: TESTING_CAMPAIGN.test(String(r.campaign ?? "")) ? ("test" as const) : ("main" as const),
         lastActive: "",
         spend: 0,
@@ -321,6 +324,7 @@ export async function GET(req: NextRequest) {
         const base = {
           id,
           name: a.name,
+          campaign: a.campaign,
           type: a.type,
           lastActive: a.lastActive,
           spend: round2(a.spend),
