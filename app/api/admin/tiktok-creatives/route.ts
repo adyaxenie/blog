@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // verdict rules lean on watch-time/hook-rate signals, which ATT can't hide.
 
 const FIELDS =
-  "date,campaign,ad_id,ad_name,spend,impressions,clicks,conversions," +
+  "date,campaign,ad_id,ad_name,ad_text,ad_group_name,spend,impressions,clicks,conversions," +
   "video_play_actions,video_watched_2s,video_watched_6s,average_video_play";
 
 const CAMPAIGN_FILTER = /dailyglowup/i;
@@ -43,6 +43,8 @@ type WindsorRow = {
   campaign?: string;
   ad_id?: string | number;
   ad_name?: string;
+  ad_text?: string;
+  ad_group_name?: string;
   spend?: number | string;
   impressions?: number | string;
   clicks?: number | string;
@@ -93,102 +95,6 @@ function verdictFor(c: Omit<Creative, "verdict" | "spendShare">): Verdict {
   if (c.cpa != null && c.cpa > EXPENSIVE_CPA) return "review";
   return "watch";
 }
-
-type Rec = { severity: "kill" | "scale" | "test" | "info"; title: string; detail: string };
-
-function buildRecommendations(
-  creatives: Creative[],
-  totals: { spend: number; conversions: number; installs: number; trueCac: number | null; coverage: number | null },
-  days: number
-): Rec[] {
-  const recs: Rec[] = [];
-  const active = creatives.filter((c) => c.spend > 0);
-  const top = active[0];
-
-  if (top && top.spendShare > 0.6) {
-    recs.push({
-      severity: "info",
-      title: `One-creative business: “${top.name}” takes ${Math.round(top.spendShare * 100)}% of spend`,
-      detail:
-        `Concentration risk — if its delivery dips, everything dips. Film 5–6 variants in one session using it as the exact template ` +
-        `(same structure, pacing, audio), put each in its own ABO ad group at $10/day for 48h, keep 2.5s+ watch time survivors.`,
-    });
-  }
-
-  for (const c of active) {
-    if (c.verdict === "kill") {
-      recs.push({
-        severity: "kill",
-        title: `Kill “${c.name}”`,
-        detail:
-          c.avgWatch != null && c.avgWatch < KILL_WATCH
-            ? `Avg watch time ${c.avgWatch.toFixed(2)}s — under the ${KILL_WATCH}s floor. Dead hook; don't wait for conversions.`
-            : `${fmt$(c.spend)} spent with 0 claimed conversions (kill line is ${fmt$(NO_CONV_KILL_SPEND)}).`,
-      });
-    }
-    if (c.verdict === "scale" && c.type === "test") {
-      recs.push({
-        severity: "scale",
-        title: `Promote “${c.name}” from ABO into the main CBO`,
-        detail: `CPA ${fmt$(c.cpa!)} on ${c.conversions} conversions with ${c.avgWatch?.toFixed(2) ?? "?"}s watch time — proven; let CBO allocate against existing winners.`,
-      });
-    }
-    // High watch time but expensive conversions = content, not an ad.
-    if (c.avgWatch != null && c.avgWatch >= 4 && c.cpa != null && c.cpa > TARGET_CPA + 5) {
-      recs.push({
-        severity: "kill",
-        title: `“${c.name}” is content, not an ad`,
-        detail: `${c.avgWatch.toFixed(2)}s watch time but ${fmt$(c.cpa)} CPA — it entertains without converting. Retire it unless you can cut a product demo into the format.`,
-      });
-    }
-  }
-
-  // Small-sample winner likely starved by CBO.
-  const starved = active.find(
-    (c) =>
-      c.cpa != null &&
-      c.cpa <= TARGET_CPA &&
-      c.conversions > 0 &&
-      c.conversions <= 2 &&
-      c.spendShare < 0.15 &&
-      c.verdict !== "kill"
-  );
-  if (starved) {
-    recs.push({
-      severity: "test",
-      title: `Retest “${starved.name}” in ABO with forced spend`,
-      detail: `${fmt$(starved.cpa!)} CPA on only ${starved.conversions} conversion${starved.conversions === 1 ? "" : "s"} and ${Math.round(
-        starved.spendShare * 100
-      )}% of budget — CBO likely starved it before it could prove out. Give it its own ad group at $10/day for 48–72h.`,
-    });
-  }
-
-  const testSpend = active.filter((c) => c.type === "test").reduce((s, c) => s + c.spend, 0);
-  if (active.length > 0 && testSpend < totals.spend * 0.05) {
-    recs.push({
-      severity: "test",
-      title: "Testing pipeline is nearly empty",
-      detail: `ABO test spend is ${fmt$(testSpend)} of ${fmt$(totals.spend)} (${
-        totals.spend > 0 ? Math.round((testSpend / totals.spend) * 100) : 0
-      }%) over the last ${days}d. Keep a standing batch of 5–6 variants at $10/day — ABO is the pipeline, CBO is the engine.`,
-    });
-  }
-
-  if (totals.coverage != null && totals.coverage < 0.2 && totals.installs > 0) {
-    recs.push({
-      severity: "info",
-      title: `TikTok sees only ${Math.round(totals.coverage * 100)}% of installs (ATT gap)`,
-      detail: `TikTok claims ${totals.conversions.toLocaleString()} conversions vs ${totals.installs.toLocaleString()} PostHog installs. True blended CAC is ${
-        totals.trueCac != null ? fmt$(totals.trueCac) : "—"
-      }/install — judge creatives on watch time and hook rate, not TikTok CPA alone.`,
-    });
-  }
-
-  const order = { kill: 0, scale: 1, test: 2, info: 3 } as const;
-  return recs.sort((a, b) => order[a.severity] - order[b.severity]);
-}
-
-const fmt$ = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
 export async function GET(req: NextRequest) {
   const apiKey = process.env.WINDSOR_API_KEY;
@@ -283,6 +189,16 @@ export async function GET(req: NextRequest) {
       } else if (known && known.size === 1) {
         // Ad has exactly one known video — safe to merge the rolled-up row.
         title = known.values().next().value ?? null;
+      }
+      // When ad_name is a TikTok-generated fallback, use ad_text (the feed
+      // caption) or ad_group_name as a more human-readable label.
+      if (!title) {
+        const caption = String(r.ad_text ?? "").trim();
+        if (caption) title = caption.length > 80 ? caption.slice(0, 77) + "…" : caption;
+      }
+      if (!title) {
+        const grpName = String(r.ad_group_name ?? "").trim();
+        if (grpName) title = grpName;
       }
       const created = fallback ? ` · created ${fallback[1]}` : "";
       const name =
@@ -380,7 +296,6 @@ export async function GET(req: NextRequest) {
       creatives,
       daily,
       totals,
-      recommendations: buildRecommendations(creatives, totals, days),
       thresholds: {
         targetCpa: TARGET_CPA,
         scaleWatch: SCALE_WATCH,
