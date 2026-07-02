@@ -2,35 +2,91 @@
 
 import { useEffect, useState } from "react";
 
-type Todo = { id: string; text: string; done: boolean; createdAt: number };
+type Todo = {
+  id: string;
+  text: string;
+  done: boolean;
+  source: "manual" | "claude";
+  createdAt: number;
+};
 
-const STORAGE_KEY = "admin_todos";
+const LEGACY_STORAGE_KEY = "admin_todos";
+const MIGRATED_KEY = "admin_todos_migrated";
 
 export default function TodoList() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [text, setText] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  async function refresh() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setTodos(JSON.parse(raw));
+      const res = await fetch("/api/admin/todos");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTodos(data.todos ?? []);
+      setError(null);
     } catch {
-      // corrupted storage — start fresh
+      setError("Couldn't load todos");
     }
     setLoaded(true);
-  }, []);
+  }
 
   useEffect(() => {
-    if (loaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
-  }, [todos, loaded]);
+    (async () => {
+      // One-time migration of old localStorage todos into the API.
+      try {
+        if (!localStorage.getItem(MIGRATED_KEY)) {
+          const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+          if (raw) {
+            const legacy = JSON.parse(raw) as { text: string; done: boolean }[];
+            const open = legacy.filter((t) => t && !t.done && t.text).map((t) => t.text);
+            if (open.length > 0) {
+              await fetch("/api/admin/todos", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tasks: open }),
+              });
+            }
+          }
+          localStorage.setItem(MIGRATED_KEY, "1");
+        }
+      } catch {
+        // migration is best-effort
+      }
+      await refresh();
+    })();
+  }, []);
 
-  function add(e: React.FormEvent) {
+  async function add(e: React.FormEvent) {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
-    setTodos([{ id: crypto.randomUUID(), text: t, done: false, createdAt: Date.now() }, ...todos]);
     setText("");
+    await fetch("/api/admin/todos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: t }),
+    });
+    await refresh();
+  }
+
+  async function toggle(t: Todo) {
+    setTodos(todos.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)));
+    await fetch("/api/admin/todos", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: t.id, done: !t.done }),
+    });
+  }
+
+  async function remove(t: Todo) {
+    setTodos(todos.filter((x) => x.id !== t.id));
+    await fetch("/api/admin/todos", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: t.id }),
+    });
   }
 
   const remaining = todos.filter((t) => !t.done).length;
@@ -39,7 +95,9 @@ export default function TodoList() {
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
       <div className="mb-4 flex items-baseline justify-between">
         <h2 className="text-sm font-medium text-zinc-100">To do</h2>
-        <span className="text-xs text-zinc-500">{remaining} open</span>
+        <span className="text-xs text-zinc-500">
+          {error ? error : `${remaining} open`}
+        </span>
       </div>
       <form onSubmit={add} className="flex gap-2">
         <input
@@ -65,9 +123,7 @@ export default function TodoList() {
               type="checkbox"
               className="h-3.5 w-3.5 accent-emerald-500"
               checked={t.done}
-              onChange={() =>
-                setTodos(todos.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)))
-              }
+              onChange={() => toggle(t)}
             />
             <span
               className={`flex-1 text-sm ${
@@ -76,16 +132,21 @@ export default function TodoList() {
             >
               {t.text}
             </span>
+            {t.source === "claude" && (
+              <span className="rounded border border-indigo-900 bg-indigo-950/60 px-1.5 py-0.5 text-[10px] text-indigo-400">
+                claude
+              </span>
+            )}
             <button
               className="text-xs text-zinc-600 opacity-0 transition-opacity hover:text-zinc-400 group-hover:opacity-100"
-              onClick={() => setTodos(todos.filter((x) => x.id !== t.id))}
+              onClick={() => remove(t)}
               aria-label="Delete"
             >
               ✕
             </button>
           </li>
         ))}
-        {loaded && todos.length === 0 && (
+        {loaded && !error && todos.length === 0 && (
           <li className="px-2 py-1.5 text-sm text-zinc-600">Nothing yet — add your first task.</li>
         )}
       </ul>

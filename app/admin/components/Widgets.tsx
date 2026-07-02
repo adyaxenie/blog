@@ -179,7 +179,7 @@ export function RevenueChart({ days }: { days: number }) {
               <YAxis {...axisProps} tickFormatter={(v: number) => `$${v}`} />
               <Tooltip
                 contentStyle={tooltipStyle}
-                formatter={(v: number) => [fmtMoney(v), "Revenue"]}
+                formatter={(v) => [fmtMoney(Number(v ?? 0)), "Revenue"]}
               />
               <Area
                 type="monotone"
@@ -325,7 +325,7 @@ export function TikTokWidget({ days }: { days: number }) {
                 <YAxis {...axisProps} tickFormatter={(v: number) => `$${v}`} />
                 <Tooltip
                   contentStyle={tooltipStyle}
-                  formatter={(v: number) => [fmtMoney(v), "Spend"]}
+                  formatter={(v) => [fmtMoney(Number(v ?? 0)), "Spend"]}
                   cursor={{ fill: "#27272a", opacity: 0.4 }}
                 />
                 <Bar dataKey="spend" fill="#f472b6" radius={[2, 2, 0, 0]} maxBarSize={48} />

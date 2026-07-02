@@ -15,6 +15,14 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get(ADMIN_COOKIE)?.value;
   if (await verifySessionToken(token, secret)) return NextResponse.next();
 
+  // Programmatic access to the todos API (e.g. Claude's scheduled report
+  // pushing daily action items) via a bearer key.
+  if (pathname === "/api/admin/todos") {
+    const apiKey = process.env.TODO_API_KEY;
+    const auth = req.headers.get("authorization") ?? "";
+    if (apiKey && auth === `Bearer ${apiKey}`) return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
