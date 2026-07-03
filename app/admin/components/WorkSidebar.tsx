@@ -198,7 +198,7 @@ export default function WorkSidebar() {
   }
 
   return (
-    <aside className="hidden shrink-0 lg:block lg:w-72">
+    <aside className="hidden shrink-0 lg:block lg:w-96">
       <div className="sticky top-6 flex max-h-[calc(100vh-3rem)] flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60">
         <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
           <h2 className="text-sm font-medium text-zinc-100">Workspace</h2>

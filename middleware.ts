@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { allowsBearerAuth, isBearerAuthorized } from "./lib/adminApiAuth";
 import { ADMIN_COOKIE, verifySessionToken } from "./lib/adminAuth";
 
 const PUBLIC_PATHS = new Set(["/admin/login", "/api/admin/login"]);
@@ -15,11 +16,9 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get(ADMIN_COOKIE)?.value;
   if (await verifySessionToken(token, secret)) return NextResponse.next();
 
-  // Programmatic access (e.g. Claude pushing daily action items) via bearer key.
-  if (pathname === "/api/admin/todos" || pathname === "/api/admin/workspace") {
-    const apiKey = process.env.TODO_API_KEY;
-    const auth = req.headers.get("authorization") ?? "";
-    if (apiKey && auth === `Bearer ${apiKey}`) return NextResponse.next();
+  // Programmatic access for scheduled Claude (read metrics + push workspace).
+  if (allowsBearerAuth(pathname) && isBearerAuthorized(req)) {
+    return NextResponse.next();
   }
 
   if (pathname.startsWith("/api/")) {

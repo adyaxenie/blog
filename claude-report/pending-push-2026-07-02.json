@@ -1,0 +1,41 @@
+{
+  "source": "claude",
+  "todos": [
+    "Film 3 new Looksmax-coach demo variations (new scan results; questions: 'What's my worst feature', 'Am I cooked or is there hope', 'Rate me honestly')",
+    "Launch the new variations as $10/day ABO test ad groups",
+    "Confirm the Jun 29 TESTING ad is fully paused (1.84s watch, $58.56, 0 conversions)",
+    "Prep a replacement/refresh for the main CBO creative - fatigue signs (7d CPA $49.26 vs $32 norm, 2.75s watch yesterday)"
+  ],
+  "actions": [
+    {
+      "severity": "kill",
+      "title": "Kill Jun 29 TESTING creative",
+      "detail": "$58.56 spend over 48h, 0 conversions, 1.84s avg watch time (below 2.5s kill line), 0.5% CTR. No spend yesterday - confirm it's paused."
+    },
+    {
+      "severity": "info",
+      "title": "Main CBO creative showing fatigue",
+      "detail": "7d: $1,674.87 spend, 34 conv, $49.26 CPA vs $32 historical. Yesterday: $239.78, 0 TikTok conv, watch time down to 2.75s from 3.5s."
+    },
+    {
+      "severity": "info",
+      "title": "Concentration risk: 100% of spend on one creative",
+      "detail": "The Apr 29 CBO ad took all of yesterday's $239.78 spend. No active test creatives in pipeline after TESTING ad stopped."
+    },
+    {
+      "severity": "test",
+      "title": "Restock ABO test pipeline with coach-demo variations",
+      "detail": "Test pipeline is empty. Launch 3 new Looksmax-coach screen-recording variations at ~$10/day each."
+    },
+    {
+      "severity": "info",
+      "title": "Install spike: 458 installs Jul 1 (vs ~200/day avg)",
+      "detail": "Blended CAC $0.52 yesterday ($239.78 / 458 PostHog installs), 90.2% onboarding completion. Likely organic spike - worth finding the source."
+    }
+  ],
+  "formats": [
+    "Looksmax coach demo: type 'What's my worst feature' into the AI coach, show a new person's scan results, scores, then routine",
+    "Looksmax coach demo: type 'Am I cooked or is there hope', show selfie scan analyzing then scores reveal",
+    "Looksmax coach demo: type 'Rate me honestly', show coach reply then routine screen"
+  ]
+}

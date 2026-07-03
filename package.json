@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "claude:push": "node scripts/push-workspace.mjs"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.4",

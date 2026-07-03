@@ -1,0 +1,31 @@
+{
+  "source": "claude",
+  "todos": [
+    "Confirm the Jun-29 ABO test creative is killed (1.84s watch, $58.56 spent, 0 conversions)",
+    "Film 2-3 new variations of the coach-demo winner format (new scan results + new typed questions)",
+    "Launch fresh $10/day ABO test ad groups - the testing pipeline is currently empty",
+    "Watch the main CBO creative for fatigue: Jul 2 had 0 TikTok conversions and watch time fell to 2.75s"
+  ],
+  "actions": [
+    {
+      "severity": "kill",
+      "title": "Kill Jun-29 ABO test creative",
+      "detail": "48h+ of spend ($58.56), 0 conversions, 1.84s avg watch (below 2.5s kill line), 0.5% CTR. No spend since Jun 30 - confirm it's paused."
+    },
+    {
+      "severity": "test",
+      "title": "Winner showing fatigue - refresh with variations",
+      "detail": "Apr-29 coach-demo creative: 7d CPA $49.26 vs ~$32 historical. Jul 2: $239.78 spend, 0 TikTok conversions, watch dropped to 2.75s from 3.5s avg."
+    },
+    {
+      "severity": "info",
+      "title": "Concentration risk: 100% of daily spend on one creative",
+      "detail": "All $239.78 of Jul 2 DailyGlowUp spend ran on the single Apr-29 CBO creative (>70% threshold). No active backup or test creatives."
+    }
+  ],
+  "formats": [
+    "Coach demo variation: type 'What's my worst feature' into the AI coach, show a new person's scan results, scores, and routine",
+    "Coach demo variation: type 'Am I cooked or is there hope', reveal a different person's scan scores then the fix routine",
+    "Coach demo variation: type 'Rate me honestly', screen-record the coach reply, scan scores, and recommended routine"
+  ]
+}
