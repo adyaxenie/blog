@@ -16,10 +16,10 @@ export const dynamic = "force-dynamic";
 // the full "Real Title _Ad name<ts>" format instead of the bare "Ad name<ts>"
 // fallback it uses when aggregating at daily granularity.
 const CREATIVE_FIELDS =
-  "campaign,ad_id,ad_name,spend,impressions,clicks,conversions," +
+  "campaign_name,ad_id,ad_name,spend,impressions,clicks,conversions," +
   "video_play_actions,video_watched_2s,video_watched_6s,average_video_play";
 // DAILY_FIELDS — with `date` for the spend/CAC time-series chart.
-const DAILY_FIELDS = "date,campaign,spend";
+const DAILY_FIELDS = "date,campaign_name,spend";
 
 const CAMPAIGN_FILTER = /dailyglowup/i;
 const TESTING_CAMPAIGN = /testing/i;
@@ -49,7 +49,8 @@ const NO_CONV_KILL_SPEND = 2 * TARGET_CPA;
 
 type WindsorRow = {
   date?: string;
-  campaign?: string;
+  campaign?: string;       // alias Windsor also accepts
+  campaign_name?: string;  // canonical field name
   ad_id?: string | number;
   ad_name?: string;
   spend?: number | string;
@@ -157,13 +158,14 @@ export async function GET(req: NextRequest) {
     }
 
     const creativePayload = await creativeRes.json();
+    const cn = (r: WindsorRow) => String(r.campaign_name ?? r.campaign ?? "");
     const creativeRows = ((creativePayload.data ?? []) as WindsorRow[]).filter((r) =>
-      CAMPAIGN_FILTER.test(String(r.campaign ?? ""))
+      CAMPAIGN_FILTER.test(cn(r))
     );
 
     const dailyPayload = await dailyRes.json();
     const dailyRows = ((dailyPayload.data ?? []) as WindsorRow[]).filter((r) =>
-      CAMPAIGN_FILTER.test(String(r.campaign ?? ""))
+      CAMPAIGN_FILTER.test(cn(r))
     );
 
     const installsByDay = new Map<string, number>();
@@ -232,8 +234,8 @@ export async function GET(req: NextRequest) {
 
       const a = byCreative.get(key) ?? {
         name,
-        campaign: String(r.campaign ?? "").trim() || "(unknown campaign)",
-        type: TESTING_CAMPAIGN.test(String(r.campaign ?? "")) ? ("test" as const) : ("main" as const),
+        campaign: cn(r) || "(unknown campaign)",
+        type: TESTING_CAMPAIGN.test(cn(r)) ? ("test" as const) : ("main" as const),
         lastActive: "",
         spend: 0,
         impressions: 0,
@@ -282,10 +284,9 @@ export async function GET(req: NextRequest) {
           verdict: verdictFor(base),
         };
       })
-      // Most recently active first, biggest spender breaking ties; cap at the
-      // last 20 creatives.
-      .sort((a, b) => b.lastActive.localeCompare(a.lastActive) || b.spend - a.spend)
-      .slice(0, 20);
+      // Biggest spender first; cap at 50 creatives.
+      .sort((a, b) => b.spend - a.spend)
+      .slice(0, 50);
 
     // Daily cost-per-install series (spend / PostHog installs, both UTC days).
     const daily: { date: string; label: string; spend: number; installs: number; costPerInstall: number | null }[] = [];
