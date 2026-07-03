@@ -11,15 +11,11 @@ export const dynamic = "force-dynamic";
 // conversions, so the verdict rules lean on watch-time/hook-rate signals,
 // which ATT can't hide.
 
-// Two separate Windsor calls:
-// CREATIVE_FIELDS — no `date` dimension. Omitting date makes Windsor return
-// the full "Real Title _Ad name<ts>" format instead of the bare "Ad name<ts>"
-// fallback it uses when aggregating at daily granularity.
-const CREATIVE_FIELDS =
-  "campaign_name,ad_id,ad_name,spend,impressions,clicks,conversions," +
+// Single Windsor call: `campaign_name` (not the alias `campaign`) is required
+// to get the full "Real Title _Ad name<ts>" format from TikTok Smart Creative.
+const FIELDS =
+  "date,campaign_name,ad_id,ad_name,spend,impressions,clicks,conversions," +
   "video_play_actions,video_watched_2s,video_watched_6s,average_video_play";
-// DAILY_FIELDS — with `date` for the spend/CAC time-series chart.
-const DAILY_FIELDS = "date,campaign_name,spend";
 
 const CAMPAIGN_FILTER = /dailyglowup/i;
 const TESTING_CAMPAIGN = /testing/i;
@@ -137,34 +133,26 @@ export async function GET(req: NextRequest) {
   `;
 
   try {
-    const base =
+    const url =
       `https://connectors.windsor.ai/tiktok?api_key=${encodeURIComponent(apiKey)}` +
-      `&date_from=${utcDate(days - 1)}&date_to=${utcDate(0)}`;
-    const [creativeRes, dailyRes, phRows, payingChart] = await Promise.all([
-      fetch(`${base}&fields=${CREATIVE_FIELDS}`, { next: { revalidate: 600 } }),
-      fetch(`${base}&fields=${DAILY_FIELDS}`, { next: { revalidate: 600 } }),
+      `&date_from=${utcDate(days - 1)}&date_to=${utcDate(0)}&fields=${FIELDS}`;
+    const [windsorRes, phRows, payingChart] = await Promise.all([
+      fetch(url, { next: { revalidate: 600 } }),
       posthogQuery(phQuery),
       fetchRcChart("conversion_to_paying").catch(() => null),
     ]);
 
-    for (const [res, label] of [[creativeRes, "creatives"], [dailyRes, "daily"]] as const) {
-      if (!res.ok) {
-        const text = await res.text();
-        return NextResponse.json(
-          { configured: true, error: `Windsor ${label} request failed (${res.status}): ${text.slice(0, 200)}` },
-          { status: 502 }
-        );
-      }
+    if (!windsorRes.ok) {
+      const text = await windsorRes.text();
+      return NextResponse.json(
+        { configured: true, error: `Windsor request failed (${windsorRes.status}): ${text.slice(0, 200)}` },
+        { status: 502 }
+      );
     }
 
-    const creativePayload = await creativeRes.json();
     const cn = (r: WindsorRow) => String(r.campaign_name ?? r.campaign ?? "");
-    const creativeRows = ((creativePayload.data ?? []) as WindsorRow[]).filter((r) =>
-      CAMPAIGN_FILTER.test(cn(r))
-    );
-
-    const dailyPayload = await dailyRes.json();
-    const dailyRows = ((dailyPayload.data ?? []) as WindsorRow[]).filter((r) =>
+    const payload = await windsorRes.json();
+    const rows = ((payload.data ?? []) as WindsorRow[]).filter((r) =>
       CAMPAIGN_FILTER.test(cn(r))
     );
 
@@ -173,16 +161,14 @@ export async function GET(req: NextRequest) {
       installsByDay.set(String(row[0]).slice(0, 10), row[1]);
     }
 
-    // Build spendByDay from the date-granular call (for the CAC chart).
     const spendByDay = new Map<string, number>();
-    for (const r of dailyRows) {
-      const day = String(r.date).slice(0, 10);
-      spendByDay.set(day, (spendByDay.get(day) ?? 0) + num(r.spend));
+    for (const r of rows) {
+      const day = String(r.date ?? "").slice(0, 10);
+      if (day) spendByDay.set(day, (spendByDay.get(day) ?? 0) + num(r.spend));
     }
 
-    // First pass: learn which video titles each ad_id carries in the
-    // creative call (no date → Windsor returns "Title _Ad name<ts>" format).
-    for (const r of creativeRows) {
+    // First pass: learn which video titles each ad_id carries.
+    for (const r of rows) {
       const id = String(r.ad_id ?? "");
       const rawName = String(r.ad_name ?? "");
       if (id && rawName && !AD_NAME_FALLBACK.test(rawName)) {
@@ -196,7 +182,6 @@ export async function GET(req: NextRequest) {
     }
 
     // Aggregate per ad_id + resolved title. Watch time is play-weighted.
-    // No `date` in this call, so lastActive stays empty; sort falls back to spend.
     type Agg = {
       name: string;
       campaign: string;
@@ -213,8 +198,9 @@ export async function GET(req: NextRequest) {
     };
     const byCreative = new Map<string, Agg>();
 
-    for (const r of creativeRows) {
+    for (const r of rows) {
       const id = String(r.ad_id ?? r.ad_name ?? "(unknown)");
+      const day = String(r.date ?? "").slice(0, 10);
 
       const rawName = String(r.ad_name ?? "");
       const fallback = rawName.match(AD_NAME_FALLBACK);
@@ -246,6 +232,7 @@ export async function GET(req: NextRequest) {
         watched6s: 0,
         watchSeconds: 0,
       };
+      if (num(r.spend) > 0 && day > a.lastActive) a.lastActive = day;
       a.spend += num(r.spend);
       a.impressions += num(r.impressions);
       a.clicks += num(r.clicks);
@@ -284,8 +271,8 @@ export async function GET(req: NextRequest) {
           verdict: verdictFor(base),
         };
       })
-      // Biggest spender first; cap at 50 creatives.
-      .sort((a, b) => b.spend - a.spend)
+      // Most recently active first, biggest spender breaking ties; cap at 50.
+      .sort((a, b) => b.lastActive.localeCompare(a.lastActive) || b.spend - a.spend)
       .slice(0, 50);
 
     // Daily cost-per-install series (spend / PostHog installs, both UTC days).
