@@ -49,13 +49,15 @@ type CreativesData = {
   configured: boolean;
   error?: string;
   creatives?: Creative[];
-  daily?: { date: string; label: string; spend: number; installs: number; trueCac: number | null }[];
+  daily?: { date: string; label: string; spend: number; installs: number; costPerInstall: number | null }[];
   totals?: {
     spend: number;
     conversions: number;
     tiktokCpa: number | null;
     installs: number;
-    trueCac: number | null;
+    newPayers: number;
+    costPerInstall: number | null;
+    paidCac: number | null;
     coverage: number | null;
   };
   recommendations?: Rec[];
@@ -129,27 +131,32 @@ export function TikTokAdsTab({ days }: { days: number }) {
   const creatives = data.creatives ?? [];
   const recs = data.recommendations ?? [];
   const daily = data.daily ?? [];
-  const cacSeries = daily.filter((d) => d.trueCac != null);
+  const cacSeries = daily.filter((d) => d.costPerInstall != null);
 
   return (
     <div className="space-y-4">
       {t && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <Tile label="Spend" value={fmtMoney(Math.round(t.spend))} sub="Daily Glow campaigns" />
           <Tile
-            label="True CAC"
-            value={t.trueCac != null ? fmtMoney2(t.trueCac) : "—"}
+            label="Cost / install"
+            value={t.costPerInstall != null ? fmtMoney2(t.costPerInstall) : "—"}
             sub={`spend / ${t.installs.toLocaleString()} PostHog installs`}
+          />
+          <Tile
+            label="Paid CAC"
+            value={t.paidCac != null ? fmtMoney2(t.paidCac) : "—"}
+            sub={`spend / ${t.newPayers.toLocaleString()} new payers (RC, 7d window)`}
           />
           <Tile
             label="TikTok CPA"
             value={t.tiktokCpa != null ? fmtMoney2(t.tiktokCpa) : "—"}
-            sub={`${t.conversions.toLocaleString()} claimed conversions`}
+            sub={`${t.conversions.toLocaleString()} claimed purchases`}
           />
           <Tile
             label="Attribution coverage"
             value={t.coverage != null ? fmtPct(t.coverage) : "—"}
-            sub="TikTok-claimed / actual installs"
+            sub="claimed / actual purchases"
           />
           <Tile label="Installs" value={t.installs.toLocaleString()} sub="PostHog, unique persons" />
         </div>
@@ -246,13 +253,13 @@ export function TikTokAdsTab({ days }: { days: number }) {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel
-          title="True CAC per day"
-          meta={`spend / PostHog installs${t?.trueCac != null ? ` · ${fmtMoney2(t.trueCac)} blended` : ""} · UTC`}
+          title="Cost per install per day"
+          meta={`spend / PostHog installs${t?.costPerInstall != null ? ` · ${fmtMoney2(t.costPerInstall)} blended` : ""} · UTC`}
         >
           {cacSeries.length < 2 ? (
             <div className="flex h-48 flex-col items-center justify-center gap-1">
               <p className="text-3xl font-semibold tabular-nums text-zinc-100">
-                {cacSeries[0]?.trueCac != null ? fmtMoney2(cacSeries[0].trueCac) : "—"}
+                {cacSeries[0]?.costPerInstall != null ? fmtMoney2(cacSeries[0].costPerInstall) : "—"}
               </p>
               <p className="text-xs text-zinc-500">{cacSeries[0]?.date ?? "today"} · spend / installs</p>
             </div>
@@ -265,15 +272,15 @@ export function TikTokAdsTab({ days }: { days: number }) {
                   <YAxis {...axisProps} tickFormatter={(v: number) => `$${v}`} />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    formatter={(v) => [fmtMoney2(Number(v)), "True CAC"]}
+                    formatter={(v) => [fmtMoney2(Number(v)), "Cost / install"]}
                   />
                   <Line
                     type="monotone"
-                    dataKey="trueCac"
+                    dataKey="costPerInstall"
                     stroke="#38bdf8"
                     strokeWidth={1.5}
                     dot={cacSeries.length <= 7 ? { r: 3, fill: "#38bdf8", strokeWidth: 0 } : false}
-                    name="True CAC"
+                    name="Cost / install"
                   />
                 </LineChart>
               </ResponsiveContainer>

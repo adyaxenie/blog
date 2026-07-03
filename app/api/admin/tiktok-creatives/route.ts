@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConfigError, pickDays, posthogQuery, round2, utcDate } from "@/lib/adminSources";
+import { ConfigError, fetchRcChart, pickDays, posthogQuery, round2, utcDate } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
 // Creative-level TikTok analytics for Daily Glow campaigns only (the ad
-// account also runs other products). TikTok-claimed conversions undercount
-// badly post-ATT, so true CAC is computed against PostHog installs and the
-// verdict rules lean on watch-time/hook-rate signals, which ATT can't hide.
+// account also runs other products). TikTok "conversions" are PAID purchases
+// (the pixel event), not installs — so claimed CPA is compared against actual
+// new paying customers from RevenueCat, and spend/installs is reported
+// separately as cost-per-install. ATT still makes TikTok undercount paid
+// conversions, so the verdict rules lean on watch-time/hook-rate signals,
+// which ATT can't hide.
 
 const FIELDS =
   "date,campaign,ad_id,ad_name,spend,impressions,clicks,conversions," +
@@ -95,11 +98,17 @@ function verdictFor(c: Omit<Creative, "verdict" | "spendShare">): Verdict {
 
 type Rec = { severity: "kill" | "scale" | "test" | "info"; title: string; detail: string };
 
-function buildRecommendations(
-  creatives: Creative[],
-  totals: { spend: number; conversions: number; installs: number; trueCac: number | null; coverage: number | null },
-  days: number
-): Rec[] {
+type Totals = {
+  spend: number;
+  conversions: number;
+  installs: number;
+  newPayers: number;
+  costPerInstall: number | null;
+  paidCac: number | null;
+  coverage: number | null;
+};
+
+function buildRecommendations(creatives: Creative[], totals: Totals, days: number): Rec[] {
   const recs: Rec[] = [];
   const active = creatives.filter((c) => c.spend > 0);
   const top = active[0];
@@ -173,13 +182,15 @@ function buildRecommendations(
     });
   }
 
-  if (totals.coverage != null && totals.coverage < 0.2 && totals.installs > 0) {
+  if (totals.coverage != null && totals.coverage < 0.5 && totals.newPayers > 0) {
     recs.push({
       severity: "info",
-      title: `TikTok sees only ${Math.round(totals.coverage * 100)}% of installs (ATT gap)`,
-      detail: `TikTok claims ${totals.conversions.toLocaleString()} conversions vs ${totals.installs.toLocaleString()} PostHog installs. True blended CAC is ${
-        totals.trueCac != null ? fmt$(totals.trueCac) : "—"
-      }/install — judge creatives on watch time and hook rate, not TikTok CPA alone.`,
+      title: `TikTok sees only ${Math.round(totals.coverage * 100)}% of paid conversions (ATT gap)`,
+      detail: `TikTok claims ${totals.conversions.toLocaleString()} purchases vs ${totals.newPayers.toLocaleString()} actual new paying customers (RevenueCat). Real paid CAC is ${
+        totals.paidCac != null ? fmt$(totals.paidCac) : "—"
+      } vs the claimed CPA — and ${
+        totals.costPerInstall != null ? fmt$(totals.costPerInstall) : "—"
+      }/install. Judge creatives on watch time and hook rate, not TikTok CPA alone.`,
     });
   }
 
@@ -214,9 +225,12 @@ export async function GET(req: NextRequest) {
     const url =
       `https://connectors.windsor.ai/tiktok?api_key=${encodeURIComponent(apiKey)}` +
       `&date_from=${utcDate(days - 1)}&date_to=${utcDate(0)}&fields=${FIELDS}`;
-    const [windsorRes, phRows] = await Promise.all([
+    // conversion_to_paying measure 1 = customers who paid within 7d of first
+    // seen, per cohort day — the "actual purchases" TikTok's pixel undercounts.
+    const [windsorRes, phRows, payingChart] = await Promise.all([
       fetch(url, { next: { revalidate: 600 } }),
       posthogQuery(phQuery),
+      fetchRcChart("conversion_to_paying").catch(() => null),
     ]);
     if (!windsorRes.ok) {
       const text = await windsorRes.text();
@@ -344,8 +358,8 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.lastActive.localeCompare(a.lastActive) || b.spend - a.spend)
       .slice(0, 20);
 
-    // Daily true-CAC series (spend / PostHog installs, both UTC days).
-    const daily: { date: string; label: string; spend: number; installs: number; trueCac: number | null }[] = [];
+    // Daily cost-per-install series (spend / PostHog installs, both UTC days).
+    const daily: { date: string; label: string; spend: number; installs: number; costPerInstall: number | null }[] = [];
     for (let i = days - 1; i >= 0; i--) {
       const date = utcDate(i);
       const spend = round2(spendByDay.get(date) ?? 0);
@@ -355,19 +369,27 @@ export async function GET(req: NextRequest) {
         label: date.slice(5, 10),
         spend,
         installs,
-        trueCac: installs > 0 ? round2(spend / installs) : null,
+        costPerInstall: installs > 0 ? round2(spend / installs) : null,
       });
     }
 
+    // Actual new paying customers (RevenueCat) over the same window.
+    const payersByDay = new Map((payingChart ?? []).map((r) => [r.date, r.measures[1] ?? 0]));
+    let newPayers = 0;
+    for (let i = days - 1; i >= 0; i--) newPayers += payersByDay.get(utcDate(i)) ?? 0;
+
     const totalInstalls = daily.reduce((s, d) => s + d.installs, 0);
     const totalConv = creatives.reduce((s, c) => s + c.conversions, 0);
-    const totals = {
+    const totals: Totals & { tiktokCpa: number | null } = {
       spend: round2(totalSpend),
       conversions: totalConv,
       tiktokCpa: totalConv > 0 ? round2(totalSpend / totalConv) : null,
       installs: totalInstalls,
-      trueCac: totalInstalls > 0 ? round2(totalSpend / totalInstalls) : null,
-      coverage: totalInstalls > 0 ? totalConv / totalInstalls : null,
+      newPayers,
+      costPerInstall: totalInstalls > 0 ? round2(totalSpend / totalInstalls) : null,
+      // TikTok pixel purchases vs actual new payers — like-for-like ATT gap.
+      paidCac: newPayers > 0 ? round2(totalSpend / newPayers) : null,
+      coverage: newPayers > 0 ? totalConv / newPayers : null,
     };
 
     return NextResponse.json({
