@@ -1,46 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
-import { MongoClient } from "mongodb";
 import { ADMIN_COOKIE, verifySessionToken } from "@/lib/adminAuth";
+import {
+  WorkspaceStoreError,
+  isWorkspaceConfigured,
+  loadWorkspace,
+  saveWorkspace,
+} from "@/lib/workspaceStore";
 
 export const dynamic = "force-dynamic";
 
-// Public todos JSON. GET is open; PUT requires either a logged-in admin
-// session or ?key= / x-update-key matching DASHBOARD_PASSWORD, e.g.:
-//   curl -X PUT /api/todos -H "x-update-key: $DASHBOARD_PASSWORD" \
-//        -d '{"todos":[{"id":"1","text":"ship it","done":false,"createdAt":0}]}'
+// Public todos JSON (backward compat). GET is open; PUT requires admin session
+// or x-update-key matching DASHBOARD_PASSWORD.
 
 type Todo = { id: string; text: string; done: boolean; createdAt: number };
-type TodosDoc = { _id: string; items: Todo[]; updatedAt: number };
 
 const MAX_ITEMS = 500;
 const MAX_TEXT = 1000;
 
-// One shared client per warm instance (and across HMR reloads in dev).
-declare global {
-  // eslint-disable-next-line no-var
-  var _todosClient: Promise<MongoClient> | undefined;
-}
-
-async function todosCollection() {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error("MONGODB_URI not set");
-  if (!global._todosClient) {
-    global._todosClient = new MongoClient(uri, { serverSelectionTimeoutMS: 5000 }).connect();
-  }
-  const client = await global._todosClient;
-  return client.db("dailyglow_admin").collection<TodosDoc>("kv");
-}
-
 export async function GET() {
+  if (!isWorkspaceConfigured()) {
+    return NextResponse.json({
+      configured: false,
+      todos: [],
+      error: "WORKSPACE_GITHUB_TOKEN not set",
+    });
+  }
   try {
-    const coll = await todosCollection();
-    const doc = await coll.findOne({ _id: "todos" });
-    return NextResponse.json({ configured: true, todos: doc?.items ?? [] });
+    const ws = await loadWorkspace();
+    const todos: Todo[] = ws.todos.map((t) => ({
+      id: t.id,
+      text: t.text,
+      done: t.done,
+      createdAt: t.createdAt,
+    }));
+    return NextResponse.json({ configured: true, todos });
   } catch (e) {
-    // Reset so a transient failure doesn't poison the cached connection.
-    global._todosClient = undefined;
     return NextResponse.json(
-      { configured: false, todos: [], error: `Todos store unavailable: ${String(e).slice(0, 160)}` },
+      {
+        configured: false,
+        todos: [],
+        error: `Todos store unavailable: ${String(e).slice(0, 160)}`,
+      },
       { status: 503 }
     );
   }
@@ -68,6 +68,7 @@ export async function PUT(req: NextRequest) {
   if (!Array.isArray(body.todos) || body.todos.length > MAX_ITEMS) {
     return NextResponse.json({ error: `todos must be an array of ≤${MAX_ITEMS} items` }, { status: 400 });
   }
+
   const items: Todo[] = [];
   for (const t of body.todos as Record<string, unknown>[]) {
     if (typeof t?.id !== "string" || typeof t?.text !== "string") {
@@ -82,18 +83,14 @@ export async function PUT(req: NextRequest) {
   }
 
   try {
-    const coll = await todosCollection();
-    await coll.updateOne(
-      { _id: "todos" },
-      { $set: { items, updatedAt: Date.now() } },
-      { upsert: true }
-    );
+    const ws = await loadWorkspace();
+    ws.todos = items.map((t) => ({ ...t, source: "manual" as const }));
+    await saveWorkspace(ws);
     return NextResponse.json({ ok: true, count: items.length });
   } catch (e) {
-    global._todosClient = undefined;
-    return NextResponse.json(
-      { error: `Todos store unavailable: ${String(e).slice(0, 160)}` },
-      { status: 503 }
-    );
+    if (e instanceof WorkspaceStoreError && !e.configured) {
+      return NextResponse.json({ error: e.message }, { status: 503 });
+    }
+    return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
   }
 }

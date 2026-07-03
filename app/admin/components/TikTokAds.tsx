@@ -21,7 +21,7 @@ import {
   axisProps,
 } from "./Widgets";
 
-// ---------- TikTok Ads tab: creative-level performance + action queue ----------
+// ---------- TikTok Ads tab: creative-level performance ----------
 
 type Verdict = "scale" | "watch" | "review" | "kill" | "needs data";
 
@@ -44,8 +44,6 @@ type Creative = {
   verdict: Verdict;
 };
 
-type Rec = { severity: "kill" | "scale" | "test" | "info"; title: string; detail: string };
-
 type CreativesData = {
   configured: boolean;
   error?: string;
@@ -59,7 +57,6 @@ type CreativesData = {
     trueCac: number | null;
     coverage: number | null;
   };
-  recommendations?: Rec[];
   thresholds?: { targetCpa: number; scaleWatch: number; killWatch: number };
 };
 
@@ -69,13 +66,6 @@ const VERDICT_STYLE: Record<Verdict, string> = {
   review: "border-amber-500/30 bg-amber-500/10 text-amber-300",
   kill: "border-rose-500/30 bg-rose-500/10 text-rose-300",
   "needs data": "border-zinc-800 bg-zinc-900 text-zinc-600",
-};
-
-const REC_DOT: Record<Rec["severity"], string> = {
-  kill: "bg-rose-400",
-  scale: "bg-emerald-400",
-  test: "bg-sky-400",
-  info: "bg-amber-400",
 };
 
 function VerdictBadge({ verdict }: { verdict: Verdict }) {
@@ -98,17 +88,6 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-// Format ideas seeded from the current winning template — the playbook is:
-// clone the winner's structure/pacing/audio, vary only the coach question and
-// the scan shown.
-const FORMAT_IDEAS = [
-  "Same flow as the top-spend winner, different person's scan. Type “What's my worst feature” — show a scan with one visibly low category score.",
-  "Different person's scan. Type “Am I cooked or is there hope” — show overall ~45–50 vs potential 70+, linger on the gap.",
-  "Different person's scan. Type “How far am I from my potential” — skip score lingering, go straight to the routine/diet recommendations.",
-  "Different person's scan. Type “Rate me honestly” — mid overall score, slow scroll through every category breakdown.",
-  "Same scan as the winner. Type “What should I fix first” — reorder to lead with the single lowest category before the full dashboard.",
-];
-
 export function TikTokAdsTab({ days }: { days: number }) {
   const { data, error, loading } = useApi<CreativesData>(`/api/admin/tiktok-creatives?days=${days}`);
   if (error || data?.error) return <Notice message={error || data?.error || ""} />;
@@ -128,7 +107,6 @@ export function TikTokAdsTab({ days }: { days: number }) {
 
   const t = data.totals;
   const creatives = data.creatives ?? [];
-  const recs = data.recommendations ?? [];
   const daily = data.daily ?? [];
   const cacSeries = daily.filter((d) => d.trueCac != null);
 
@@ -155,24 +133,6 @@ export function TikTokAdsTab({ days }: { days: number }) {
           <Tile label="Installs" value={t.installs.toLocaleString()} sub="PostHog, unique persons" />
         </div>
       )}
-
-      <Panel title="Action queue" meta={`rules: kill <${data.thresholds?.killWatch}s watch · scale ≤$${data.thresholds?.targetCpa} CPA at ${data.thresholds?.scaleWatch}s+ · UTC`}>
-        {recs.length === 0 ? (
-          <p className="text-xs text-zinc-500">Nothing actionable in this range — keep the current setup running.</p>
-        ) : (
-          <ul className="space-y-3">
-            {recs.map((r, i) => (
-              <li key={i} className="flex gap-2.5">
-                <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${REC_DOT[r.severity]}`} />
-                <div>
-                  <p className="text-xs font-medium text-zinc-100">{r.title}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-zinc-500">{r.detail}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
 
       <Panel title="Creative performance" meta={`last ${creatives.length} creatives with spend · newest first · UTC`}>
         {creatives.length === 0 ? (
@@ -248,56 +208,41 @@ export function TikTokAdsTab({ days }: { days: number }) {
         )}
       </Panel>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Panel
-          title="True CAC per day"
-          meta={`spend / PostHog installs${t?.trueCac != null ? ` · ${fmtMoney2(t.trueCac)} blended` : ""} · UTC`}
-        >
-          {cacSeries.length < 2 ? (
-            <div className="flex h-48 flex-col items-center justify-center gap-1">
-              <p className="text-3xl font-semibold tabular-nums text-zinc-100">
-                {cacSeries[0]?.trueCac != null ? fmtMoney2(cacSeries[0].trueCac) : "—"}
-              </p>
-              <p className="text-xs text-zinc-500">{cacSeries[0]?.date ?? "today"} · spend / installs</p>
-            </div>
-          ) : (
-            <div className="relative h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={cacSeries} margin={{ top: 4, right: 4, bottom: 0, left: -12 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                  <XAxis dataKey="label" {...axisProps} />
-                  <YAxis {...axisProps} tickFormatter={(v: number) => `$${v}`} />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    formatter={(v) => [fmtMoney2(Number(v)), "True CAC"]}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="trueCac"
-                    stroke="#38bdf8"
-                    strokeWidth={1.5}
-                    dot={cacSeries.length <= 7 ? { r: 3, fill: "#38bdf8", strokeWidth: 0 } : false}
-                    name="True CAC"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="Formats to try next" meta="clone the winner, vary one variable">
-          <ol className="list-decimal space-y-2.5 pl-4 text-xs leading-relaxed text-zinc-400 marker:text-zinc-600">
-            {FORMAT_IDEAS.map((f, i) => (
-              <li key={i}>{f}</li>
-            ))}
-          </ol>
-          <p className="mt-3 border-t border-zinc-800/60 pt-3 text-[10px] leading-relaxed text-zinc-600">
-            Film all in one session. Each in its own ABO ad group at $10/day, 48h. Kill under{" "}
-            {"2.5s"} watch time, promote survivors to the main CBO. Keep hook copy fixed — the
-            variable is the coach question, not the overlay text.
-          </p>
-        </Panel>
-      </div>
+      <Panel
+        title="True CAC per day"
+        meta={`spend / PostHog installs${t?.trueCac != null ? ` · ${fmtMoney2(t.trueCac)} blended` : ""} · UTC`}
+      >
+        {cacSeries.length < 2 ? (
+          <div className="flex h-48 flex-col items-center justify-center gap-1">
+            <p className="text-3xl font-semibold tabular-nums text-zinc-100">
+              {cacSeries[0]?.trueCac != null ? fmtMoney2(cacSeries[0].trueCac) : "—"}
+            </p>
+            <p className="text-xs text-zinc-500">{cacSeries[0]?.date ?? "today"} · spend / installs</p>
+          </div>
+        ) : (
+          <div className="relative h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={cacSeries} margin={{ top: 4, right: 4, bottom: 0, left: -12 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                <XAxis dataKey="label" {...axisProps} />
+                <YAxis {...axisProps} tickFormatter={(v: number) => `$${v}`} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(v) => [fmtMoney2(Number(v)), "True CAC"]}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="trueCac"
+                  stroke="#38bdf8"
+                  strokeWidth={1.5}
+                  dot={cacSeries.length <= 7 ? { r: 3, fill: "#38bdf8", strokeWidth: 0 } : false}
+                  name="True CAC"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

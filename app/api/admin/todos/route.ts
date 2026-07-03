@@ -1,50 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
-const { connect, disconnect } = require("../../../../lib/mongodb");
+import {
+  WorkspaceStoreError,
+  loadWorkspace,
+  newWorkspaceId,
+  saveWorkspace,
+} from "@/lib/workspaceStore";
 
 export const dynamic = "force-dynamic";
 
-const DB = "admin_dashboard";
-const COLLECTION = "todos";
+const MAX_TEXT = 1000;
 
-type TodoDoc = {
-  _id?: ObjectId;
-  text: string;
-  done: boolean;
-  source: "manual" | "claude";
-  createdAt: number;
-};
-
-function serialize(doc: any) {
+function serializeTodo(t: { id: string; text: string; done: boolean; source?: string; createdAt: number }) {
   return {
-    id: doc._id.toString(),
-    text: doc.text,
-    done: !!doc.done,
-    source: doc.source ?? "manual",
-    createdAt: doc.createdAt ?? 0,
+    id: t.id,
+    text: t.text,
+    done: t.done,
+    source: t.source ?? "manual",
+    createdAt: t.createdAt,
   };
 }
 
-// GET /api/admin/todos → { todos: [...] }
+// GET /api/admin/todos → { todos: [...] }  (backward compat for Claude cron jobs)
 export async function GET() {
-  const client = await connect();
   try {
-    const todos = await client
-      .db(DB)
-      .collection(COLLECTION)
-      .find({})
-      .sort({ done: 1, createdAt: -1 })
-      .limit(200)
-      .toArray();
-    return NextResponse.json({ todos: todos.map(serialize) });
-  } finally {
-    await disconnect(client);
+    const ws = await loadWorkspace();
+    return NextResponse.json({ todos: ws.todos.map(serializeTodo) });
+  } catch (e) {
+    if (e instanceof WorkspaceStoreError && !e.configured) {
+      return NextResponse.json({ todos: [], error: e.message }, { status: 503 });
+    }
+    return NextResponse.json({ todos: [], error: String(e).slice(0, 160) }, { status: 503 });
   }
 }
 
-// POST /api/admin/todos
-// Body: { text: string } for a single task, or { tasks: string[] } for a batch
-// (batch is used by automated pushes, e.g. Claude's daily report).
+// POST /api/admin/todos — proxy append to workspace todos
 export async function POST(req: NextRequest) {
   let body: any;
   try {
@@ -53,7 +42,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  const source: TodoDoc["source"] = body.source === "claude" ? "claude" : "manual";
+  const source: "manual" | "claude" = body.source === "claude" ? "claude" : "manual";
   const texts: string[] = Array.isArray(body.tasks)
     ? body.tasks
     : typeof body.text === "string"
@@ -67,38 +56,28 @@ export async function POST(req: NextRequest) {
     .slice(0, 25);
 
   if (clean.length === 0) {
-    return NextResponse.json(
-      { error: "provide { text } or { tasks: string[] }" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "provide { text } or { tasks: string[] }" }, { status: 400 });
   }
 
-  const now = Date.now();
-  const docs: TodoDoc[] = clean.map((text, i) => ({
-    text: text.slice(0, 500),
-    done: false,
-    source,
-    // preserve given order when sorted by createdAt desc
-    createdAt: now + (clean.length - i),
-  }));
-
-  const client = await connect();
   try {
-    const col = client.db(DB).collection(COLLECTION);
-    // Skip exact-duplicate open tasks (idempotent daily pushes).
-    const existing = await col
-      .find({ done: false, text: { $in: docs.map((d) => d.text) } })
-      .project({ text: 1 })
-      .toArray();
-    const existingTexts = new Set(existing.map((d: any) => d.text));
-    const toInsert = docs.filter((d) => !existingTexts.has(d.text));
-    if (toInsert.length > 0) await col.insertMany(toInsert);
+    const ws = await loadWorkspace();
+    const open = new Set(ws.todos.filter((t) => !t.done).map((t) => t.text));
+    const now = Date.now();
+    let inserted = 0;
+    for (const text of clean) {
+      const t = text.slice(0, MAX_TEXT);
+      if (open.has(t)) continue;
+      open.add(t);
+      ws.todos.unshift({ id: newWorkspaceId(), text: t, done: false, source, createdAt: now + inserted });
+      inserted++;
+    }
+    await saveWorkspace(ws);
     return NextResponse.json({
-      inserted: toInsert.length,
-      skippedDuplicates: docs.length - toInsert.length,
+      inserted,
+      skippedDuplicates: clean.length - inserted,
     });
-  } finally {
-    await disconnect(client);
+  } catch (e) {
+    return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
   }
 }
 
@@ -113,21 +92,16 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.id !== "string" || typeof body.done !== "boolean") {
     return NextResponse.json({ error: "provide { id, done }" }, { status: 400 });
   }
-  let _id: ObjectId;
+
   try {
-    _id = new ObjectId(body.id);
-  } catch {
-    return NextResponse.json({ error: "invalid id" }, { status: 400 });
-  }
-  const client = await connect();
-  try {
-    const r = await client
-      .db(DB)
-      .collection(COLLECTION)
-      .updateOne({ _id }, { $set: { done: body.done } });
-    return NextResponse.json({ updated: r.modifiedCount });
-  } finally {
-    await disconnect(client);
+    const ws = await loadWorkspace();
+    const item = ws.todos.find((t) => t.id === body.id);
+    if (!item) return NextResponse.json({ error: "not found" }, { status: 404 });
+    item.done = body.done;
+    await saveWorkspace(ws);
+    return NextResponse.json({ updated: 1 });
+  } catch (e) {
+    return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
   }
 }
 
@@ -142,17 +116,14 @@ export async function DELETE(req: NextRequest) {
   if (typeof body.id !== "string") {
     return NextResponse.json({ error: "provide { id }" }, { status: 400 });
   }
-  let _id: ObjectId;
+
   try {
-    _id = new ObjectId(body.id);
-  } catch {
-    return NextResponse.json({ error: "invalid id" }, { status: 400 });
-  }
-  const client = await connect();
-  try {
-    const r = await client.db(DB).collection(COLLECTION).deleteOne({ _id });
-    return NextResponse.json({ deleted: r.deletedCount });
-  } finally {
-    await disconnect(client);
+    const ws = await loadWorkspace();
+    const before = ws.todos.length;
+    ws.todos = ws.todos.filter((t) => t.id !== body.id);
+    await saveWorkspace(ws);
+    return NextResponse.json({ deleted: before - ws.todos.length });
+  } catch (e) {
+    return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
   }
 }
