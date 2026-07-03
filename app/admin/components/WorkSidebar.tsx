@@ -58,7 +58,14 @@ export default function WorkSidebar() {
     try {
       const res = await fetch("/api/admin/workspace");
       const json = await res.json();
-      setWs(json);
+      setWs({
+        configured: res.ok && json.configured !== false,
+        todos: Array.isArray(json.todos) ? json.todos : [],
+        actions: Array.isArray(json.actions) ? json.actions : [],
+        formats: Array.isArray(json.formats) ? json.formats : [],
+        updatedAt: Number(json.updatedAt) || 0,
+        error: res.ok ? json.error : json.error ?? `Request failed (${res.status})`,
+      });
     } catch {
       setWs({ configured: false, todos: [], actions: [], formats: [], updatedAt: 0 });
     } finally {
@@ -98,50 +105,57 @@ export default function WorkSidebar() {
       ...ws,
       [section]: ws[section].map((x) => (x.id === id ? { ...x, done } : x)),
     });
-    await fetch("/api/admin/workspace", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ section, id, done }),
-    });
+    if (section === "todos") {
+      await fetch("/api/admin/todos", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, done }),
+      });
+    } else {
+      await fetch("/api/admin/workspace", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ section, id, done }),
+      });
+    }
     void fetchWorkspace();
   }
 
   async function remove(section: "todos" | "formats", id: string) {
     if (!ws) return;
     setWs({ ...ws, [section]: ws[section].filter((x) => x.id !== id) });
-    await fetch("/api/admin/workspace", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ section, id }),
-    });
+    if (section === "todos") {
+      await fetch("/api/admin/todos", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+    } else {
+      await fetch("/api/admin/workspace", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ section, id }),
+      });
+    }
     void fetchWorkspace();
   }
 
   async function addTask(e: React.FormEvent) {
     e.preventDefault();
     const text = taskText.trim();
-    if (!text || !ws) return;
-    const next: Todo = {
-      id: crypto.randomUUID(),
-      text,
-      done: false,
-      source: "manual",
-      createdAt: Date.now(),
-    };
-    const todos = [next, ...ws.todos];
-    setWs({ ...ws, todos });
+    if (!text) return;
     setTaskText("");
-    await fetch("/api/admin/workspace", {
-      method: "PUT",
+    await fetch("/api/admin/todos", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ todos }),
+      body: JSON.stringify({ text }),
     });
     void fetchWorkspace();
   }
 
-  const openTodos = ws?.todos.filter((t) => !t.done).length ?? 0;
-  const openFormats = ws?.formats.filter((f) => !f.done).length ?? 0;
-  const actionCount = ws?.actions.length ?? 0;
+  const openTodos = (ws?.todos ?? []).filter((t) => !t.done).length;
+  const openFormats = (ws?.formats ?? []).filter((f) => !f.done).length;
+  const actionCount = ws?.actions?.length ?? 0;
 
   if (collapsed) {
     return (
@@ -198,9 +212,9 @@ export default function WorkSidebar() {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {ws?.configured === false && (
+          {(ws?.configured === false || ws?.error) && (
             <p className="border-b border-zinc-800 px-4 py-3 text-xs text-amber-400/80">
-              Set WORKSPACE_GITHUB_TOKEN to enable sync.
+              {ws?.error ?? "MySQL not configured — check DB_* vars in .env.local"}
             </p>
           )}
 

@@ -1,46 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { RowDataPacket } from "mysql2/promise";
 import { ADMIN_COOKIE, verifySessionToken } from "@/lib/adminAuth";
-import {
-  WorkspaceStoreError,
-  isWorkspaceConfigured,
-  loadWorkspace,
-  saveWorkspace,
-} from "@/lib/workspaceStore";
+import { ensureSchema, isMysqlConfigured, query } from "@/lib/mysql";
 
 export const dynamic = "force-dynamic";
 
-// Public todos JSON (backward compat). GET is open; PUT requires admin session
-// or x-update-key matching DASHBOARD_PASSWORD.
+// Public todos JSON. GET is open; PUT requires admin session or x-update-key.
 
-type Todo = { id: string; text: string; done: boolean; createdAt: number };
+type TodoRow = RowDataPacket & {
+  id: string;
+  text: string;
+  done: number;
+  created_at: number;
+};
 
 const MAX_ITEMS = 500;
 const MAX_TEXT = 1000;
 
 export async function GET() {
-  if (!isWorkspaceConfigured()) {
-    return NextResponse.json({
-      configured: false,
-      todos: [],
-      error: "WORKSPACE_GITHUB_TOKEN not set",
-    });
+  if (!isMysqlConfigured()) {
+    return NextResponse.json({ configured: false, todos: [], error: "MySQL not configured" });
   }
   try {
-    const ws = await loadWorkspace();
-    const todos: Todo[] = ws.todos.map((t) => ({
-      id: t.id,
-      text: t.text,
-      done: t.done,
-      createdAt: t.createdAt,
-    }));
-    return NextResponse.json({ configured: true, todos });
+    await ensureSchema();
+    const rows = await query<TodoRow[]>(
+      "SELECT id, text, done, created_at FROM todos ORDER BY done ASC, created_at DESC LIMIT ?",
+      [MAX_ITEMS]
+    );
+    return NextResponse.json({
+      configured: true,
+      todos: rows.map((r) => ({
+        id: r.id,
+        text: r.text,
+        done: !!r.done,
+        createdAt: Number(r.created_at),
+      })),
+    });
   } catch (e) {
     return NextResponse.json(
-      {
-        configured: false,
-        todos: [],
-        error: `Todos store unavailable: ${String(e).slice(0, 160)}`,
-      },
+      { configured: false, todos: [], error: `Todos store unavailable: ${String(e).slice(0, 160)}` },
       { status: 503 }
     );
   }
@@ -69,7 +67,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: `todos must be an array of ≤${MAX_ITEMS} items` }, { status: 400 });
   }
 
-  const items: Todo[] = [];
+  const items: { id: string; text: string; done: boolean; createdAt: number }[] = [];
   for (const t of body.todos as Record<string, unknown>[]) {
     if (typeof t?.id !== "string" || typeof t?.text !== "string") {
       return NextResponse.json({ error: "each todo needs string id and text" }, { status: 400 });
@@ -83,14 +81,16 @@ export async function PUT(req: NextRequest) {
   }
 
   try {
-    const ws = await loadWorkspace();
-    ws.todos = items.map((t) => ({ ...t, source: "manual" as const }));
-    await saveWorkspace(ws);
+    await ensureSchema();
+    await query("DELETE FROM todos");
+    for (const t of items) {
+      await query(
+        "INSERT INTO todos (id, text, done, source, created_at) VALUES (?, ?, ?, 'manual', ?)",
+        [t.id, t.text, t.done ? 1 : 0, t.createdAt || Date.now()]
+      );
+    }
     return NextResponse.json({ ok: true, count: items.length });
   } catch (e) {
-    if (e instanceof WorkspaceStoreError && !e.configured) {
-      return NextResponse.json({ error: e.message }, { status: 503 });
-    }
     return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
   }
 }

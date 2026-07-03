@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  WorkspaceStoreError,
-  isWorkspaceConfigured,
-  loadWorkspace,
-  newWorkspaceId,
-  saveWorkspace,
-  type WorkspaceData,
-} from "@/lib/workspaceStore";
+import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { ensureSchema, isMysqlConfigured, query, seedFormatsIfEmpty } from "@/lib/mysql";
 
 export const dynamic = "force-dynamic";
 
@@ -14,34 +8,97 @@ const MAX_ITEMS = 500;
 const MAX_TEXT = 1000;
 const SEVERITIES = new Set(["kill", "scale", "test", "info"]);
 
-function serialize(ws: WorkspaceData) {
+type TodoRow = RowDataPacket & {
+  id: string;
+  text: string;
+  done: number;
+  source: "manual" | "claude";
+  created_at: number;
+};
+
+type ActionRow = RowDataPacket & {
+  id: string;
+  severity: "kill" | "scale" | "test" | "info";
+  title: string;
+  detail: string;
+  source: "claude";
+  created_at: number;
+};
+
+type FormatRow = RowDataPacket & {
+  id: string;
+  text: string;
+  done: number;
+  source: "manual" | "claude";
+  created_at: number;
+};
+
+async function loadAll() {
+  await ensureSchema();
+  await seedFormatsIfEmpty();
+  const [todos, actions, formats] = await Promise.all([
+    query<TodoRow[]>(
+      "SELECT id, text, done, source, created_at FROM todos ORDER BY done ASC, created_at DESC LIMIT ?",
+      [MAX_ITEMS]
+    ),
+    query<ActionRow[]>(
+      "SELECT id, severity, title, detail, source, created_at FROM actions ORDER BY created_at DESC LIMIT ?",
+      [MAX_ITEMS]
+    ),
+    query<FormatRow[]>(
+      "SELECT id, text, done, source, created_at FROM formats ORDER BY done ASC, created_at DESC LIMIT ?",
+      [MAX_ITEMS]
+    ),
+  ]);
+  const updatedAt = Math.max(
+    0,
+    ...todos.map((r) => Number(r.created_at)),
+    ...actions.map((r) => Number(r.created_at)),
+    ...formats.map((r) => Number(r.created_at))
+  );
   return {
-    configured: isWorkspaceConfigured(),
-    todos: ws.todos,
-    actions: ws.actions,
-    formats: ws.formats,
-    updatedAt: ws.updatedAt,
+    configured: isMysqlConfigured(),
+    todos: todos.map((r) => ({
+      id: r.id,
+      text: r.text,
+      done: !!r.done,
+      source: r.source ?? "manual",
+      createdAt: Number(r.created_at),
+    })),
+    actions: actions.map((r) => ({
+      id: r.id,
+      severity: r.severity,
+      title: r.title,
+      detail: r.detail,
+      source: "claude" as const,
+      createdAt: Number(r.created_at),
+    })),
+    formats: formats.map((r) => ({
+      id: r.id,
+      text: r.text,
+      done: !!r.done,
+      source: r.source ?? "manual",
+      createdAt: Number(r.created_at),
+    })),
+    updatedAt,
   };
 }
 
-function unavailable(e: unknown) {
-  if (e instanceof WorkspaceStoreError && !e.configured) {
+function dbError(e: unknown) {
+  if (!isMysqlConfigured()) {
     return NextResponse.json(
-      { configured: false, todos: [], actions: [], formats: [], updatedAt: 0, error: e.message },
+      { configured: false, todos: [], actions: [], formats: [], updatedAt: 0, error: "MySQL not configured" },
       { status: 503 }
     );
   }
-  return NextResponse.json(
-    { configured: isWorkspaceConfigured(), error: String(e).slice(0, 160) },
-    { status: 503 }
-  );
+  return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
 }
 
 export async function GET() {
   try {
-    return NextResponse.json(serialize(await loadWorkspace()));
+    return NextResponse.json(await loadAll());
   } catch (e) {
-    return unavailable(e);
+    return dbError(e);
   }
 }
 
@@ -58,41 +115,67 @@ export async function POST(req: NextRequest) {
   let appended = 0;
 
   try {
-    const ws = await loadWorkspace();
+    await ensureSchema();
 
     if (Array.isArray(body.todos)) {
-      const open = new Set(ws.todos.filter((t) => !t.done).map((t) => t.text));
-      for (const raw of body.todos.filter((t: unknown) => typeof t === "string").slice(0, 25)) {
-        const text = raw.trim().slice(0, MAX_TEXT);
-        if (!text || open.has(text)) continue;
-        open.add(text);
-        ws.todos.unshift({ id: newWorkspaceId(), text, done: false, source, createdAt: now });
-        appended++;
+      const texts = body.todos
+        .filter((t: unknown) => typeof t === "string")
+        .map((t: string) => t.trim().slice(0, MAX_TEXT))
+        .filter(Boolean)
+        .slice(0, 25);
+      if (texts.length) {
+        const placeholders = texts.map(() => "?").join(", ");
+        const existing = await query<TodoRow[]>(
+          `SELECT text FROM todos WHERE done = 0 AND text IN (${placeholders})`,
+          texts
+        );
+        const open = new Set(existing.map((r) => r.text));
+        for (const text of texts) {
+          if (open.has(text)) continue;
+          open.add(text);
+          await query(
+            "INSERT INTO todos (id, text, done, source, created_at) VALUES (?, ?, 0, ?, ?)",
+            [crypto.randomUUID(), text, source, now + appended]
+          );
+          appended++;
+        }
       }
     }
 
     if (Array.isArray(body.actions)) {
       for (const a of body.actions.filter((x: any) => x && typeof x.title === "string").slice(0, 25)) {
-        ws.actions.unshift({
-          id: newWorkspaceId(),
-          severity: SEVERITIES.has(a.severity) ? a.severity : "info",
-          title: String(a.title).slice(0, MAX_TEXT),
-          detail: typeof a.detail === "string" ? a.detail.slice(0, MAX_TEXT) : "",
-          source: "claude",
-          createdAt: now,
-        });
+        await query(
+          "INSERT INTO actions (id, severity, title, detail, source, created_at) VALUES (?, ?, ?, ?, 'claude', ?)",
+          [
+            crypto.randomUUID(),
+            SEVERITIES.has(a.severity) ? a.severity : "info",
+            String(a.title).slice(0, MAX_TEXT),
+            typeof a.detail === "string" ? a.detail.slice(0, MAX_TEXT) : "",
+            now + appended,
+          ]
+        );
         appended++;
       }
     }
 
     if (Array.isArray(body.formats)) {
-      const existing = new Set(ws.formats.map((f) => f.text));
-      for (const raw of body.formats.filter((f: unknown) => typeof f === "string").slice(0, 25)) {
-        const text = raw.trim().slice(0, MAX_TEXT);
-        if (!text || existing.has(text)) continue;
-        existing.add(text);
-        ws.formats.unshift({ id: newWorkspaceId(), text, done: false, source, createdAt: now });
-        appended++;
+      const texts = body.formats
+        .filter((f: unknown) => typeof f === "string")
+        .map((f: string) => f.trim().slice(0, MAX_TEXT))
+        .filter(Boolean)
+        .slice(0, 25);
+      if (texts.length) {
+        const existing = await query<FormatRow[]>("SELECT text FROM formats");
+        const seen = new Set(existing.map((r) => r.text));
+        for (const text of texts) {
+          if (seen.has(text)) continue;
+          seen.add(text);
+          await query(
+            "INSERT INTO formats (id, text, done, source, created_at) VALUES (?, ?, 0, ?, ?)",
+            [crypto.randomUUID(), text, source, now + appended]
+          );
+          appended++;
+        }
       }
     }
 
@@ -103,67 +186,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ appended, ...serialize(await saveWorkspace(ws)) });
+    return NextResponse.json({ appended, ...(await loadAll()) });
   } catch (e) {
-    return unavailable(e);
-  }
-}
-
-export async function PUT(req: NextRequest) {
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
-  }
-
-  try {
-    const ws = await loadWorkspace();
-    const now = Date.now();
-
-    if (Array.isArray(body.todos)) {
-      if (body.todos.length > MAX_ITEMS) {
-        return NextResponse.json({ error: `todos must be ≤${MAX_ITEMS} items` }, { status: 400 });
-      }
-      ws.todos = body.todos.map((t: any) => ({
-        id: typeof t.id === "string" ? t.id.slice(0, 64) : newWorkspaceId(),
-        text: String(t.text ?? "").slice(0, MAX_TEXT),
-        done: !!t.done,
-        source: t.source === "claude" ? "claude" : "manual",
-        createdAt: Number(t.createdAt) || now,
-      }));
-    }
-
-    if (Array.isArray(body.actions)) {
-      if (body.actions.length > MAX_ITEMS) {
-        return NextResponse.json({ error: `actions must be ≤${MAX_ITEMS} items` }, { status: 400 });
-      }
-      ws.actions = body.actions.map((a: any) => ({
-        id: typeof a.id === "string" ? a.id.slice(0, 64) : newWorkspaceId(),
-        severity: SEVERITIES.has(a.severity) ? a.severity : "info",
-        title: String(a.title ?? "").slice(0, MAX_TEXT),
-        detail: typeof a.detail === "string" ? a.detail.slice(0, MAX_TEXT) : "",
-        source: "claude",
-        createdAt: Number(a.createdAt) || now,
-      }));
-    }
-
-    if (Array.isArray(body.formats)) {
-      if (body.formats.length > MAX_ITEMS) {
-        return NextResponse.json({ error: `formats must be ≤${MAX_ITEMS} items` }, { status: 400 });
-      }
-      ws.formats = body.formats.map((f: any) => ({
-        id: typeof f.id === "string" ? f.id.slice(0, 64) : newWorkspaceId(),
-        text: String(f.text ?? "").slice(0, MAX_TEXT),
-        done: !!f.done,
-        source: f.source === "claude" ? "claude" : "manual",
-        createdAt: Number(f.createdAt) || now,
-      }));
-    }
-
-    return NextResponse.json(serialize(await saveWorkspace(ws)));
-  } catch (e) {
-    return unavailable(e);
+    return dbError(e);
   }
 }
 
@@ -175,27 +200,26 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
   const section = body.section;
-  if (!["todos", "actions", "formats"].includes(section) || typeof body.id !== "string") {
-    return NextResponse.json({ error: "provide { section, id }" }, { status: 400 });
+  if (!["todos", "formats"].includes(section) || typeof body.id !== "string") {
+    return NextResponse.json({ error: "provide { section: todos|formats, id, done? }" }, { status: 400 });
+  }
+  if (typeof body.done !== "boolean") {
+    return NextResponse.json({ error: "provide { done: boolean }" }, { status: 400 });
   }
 
   try {
-    const ws = await loadWorkspace();
-    const list: any[] = (ws as any)[section];
-    const item = list.find((x) => x.id === body.id);
-    if (!item) return NextResponse.json({ error: "item not found" }, { status: 404 });
-
-    if (typeof body.done === "boolean" && "done" in item) item.done = body.done;
-    if (typeof body.text === "string" && "text" in item) item.text = body.text.slice(0, MAX_TEXT);
-    if (typeof body.title === "string" && "title" in item) item.title = body.title.slice(0, MAX_TEXT);
-    if (typeof body.detail === "string" && "detail" in item) item.detail = body.detail.slice(0, MAX_TEXT);
-    if (typeof body.severity === "string" && SEVERITIES.has(body.severity) && "severity" in item) {
-      item.severity = body.severity;
+    await ensureSchema();
+    const table = section as "todos" | "formats";
+    const result = await query<ResultSetHeader>(
+      `UPDATE ${table} SET done = ? WHERE id = ?`,
+      [body.done ? 1 : 0, body.id]
+    );
+    if (result.affectedRows === 0) {
+      return NextResponse.json({ error: "item not found" }, { status: 404 });
     }
-
-    return NextResponse.json(serialize(await saveWorkspace(ws)));
+    return NextResponse.json(await loadAll());
   } catch (e) {
-    return unavailable(e);
+    return dbError(e);
   }
 }
 
@@ -207,18 +231,16 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
   const section = body.section;
-  if (!["todos", "actions", "formats"].includes(section) || typeof body.id !== "string") {
-    return NextResponse.json({ error: "provide { section, id }" }, { status: 400 });
+  if (!["todos", "formats"].includes(section) || typeof body.id !== "string") {
+    return NextResponse.json({ error: "provide { section: todos|formats, id }" }, { status: 400 });
   }
 
   try {
-    const ws = await loadWorkspace();
-    const list: any[] = (ws as any)[section];
-    const before = list.length;
-    (ws as any)[section] = list.filter((x) => x.id !== body.id);
-    const removed = before - (ws as any)[section].length;
-    return NextResponse.json({ removed, ...serialize(await saveWorkspace(ws)) });
+    await ensureSchema();
+    const table = section as "todos" | "formats";
+    const result = await query<ResultSetHeader>(`DELETE FROM ${table} WHERE id = ?`, [body.id]);
+    return NextResponse.json({ removed: result.affectedRows, ...(await loadAll()) });
   } catch (e) {
-    return unavailable(e);
+    return dbError(e);
   }
 }

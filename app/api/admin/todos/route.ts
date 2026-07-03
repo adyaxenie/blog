@@ -1,39 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  WorkspaceStoreError,
-  loadWorkspace,
-  newWorkspaceId,
-  saveWorkspace,
-} from "@/lib/workspaceStore";
+import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { ensureSchema, isMysqlConfigured, query } from "@/lib/mysql";
 
 export const dynamic = "force-dynamic";
 
 const MAX_TEXT = 1000;
 
-function serializeTodo(t: { id: string; text: string; done: boolean; source?: string; createdAt: number }) {
+type TodoRow = RowDataPacket & {
+  id: string;
+  text: string;
+  done: number;
+  source: "manual" | "claude";
+  created_at: number;
+};
+
+function serialize(row: TodoRow) {
   return {
-    id: t.id,
-    text: t.text,
-    done: t.done,
-    source: t.source ?? "manual",
-    createdAt: t.createdAt,
+    id: row.id,
+    text: row.text,
+    done: !!row.done,
+    source: row.source ?? "manual",
+    createdAt: Number(row.created_at),
   };
 }
 
-// GET /api/admin/todos → { todos: [...] }  (backward compat for Claude cron jobs)
+function dbError(e: unknown) {
+  if (!isMysqlConfigured()) {
+    return NextResponse.json({ todos: [], error: "MySQL not configured" }, { status: 503 });
+  }
+  return NextResponse.json({ todos: [], error: String(e).slice(0, 160) }, { status: 503 });
+}
+
 export async function GET() {
   try {
-    const ws = await loadWorkspace();
-    return NextResponse.json({ todos: ws.todos.map(serializeTodo) });
+    await ensureSchema();
+    const rows = await query<TodoRow[]>(
+      "SELECT id, text, done, source, created_at FROM todos ORDER BY done ASC, created_at DESC LIMIT 200"
+    );
+    return NextResponse.json({ todos: rows.map(serialize) });
   } catch (e) {
-    if (e instanceof WorkspaceStoreError && !e.configured) {
-      return NextResponse.json({ todos: [], error: e.message }, { status: 503 });
-    }
-    return NextResponse.json({ todos: [], error: String(e).slice(0, 160) }, { status: 503 });
+    return dbError(e);
   }
 }
 
-// POST /api/admin/todos — proxy append to workspace todos
 export async function POST(req: NextRequest) {
   let body: any;
   try {
@@ -60,28 +69,37 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const ws = await loadWorkspace();
-    const open = new Set(ws.todos.filter((t) => !t.done).map((t) => t.text));
+    await ensureSchema();
+    const trimmed = clean.map((t) => t.slice(0, MAX_TEXT));
+    const placeholders = trimmed.map(() => "?").join(", ");
+    const existing = await query<TodoRow[]>(
+      `SELECT text FROM todos WHERE done = 0 AND text IN (${placeholders})`,
+      trimmed
+    );
+    const open = new Set(existing.map((r) => r.text));
     const now = Date.now();
     let inserted = 0;
+
     for (const text of clean) {
       const t = text.slice(0, MAX_TEXT);
       if (open.has(t)) continue;
       open.add(t);
-      ws.todos.unshift({ id: newWorkspaceId(), text: t, done: false, source, createdAt: now + inserted });
+      await query(
+        "INSERT INTO todos (id, text, done, source, created_at) VALUES (?, ?, 0, ?, ?)",
+        [crypto.randomUUID(), t, source, now + inserted]
+      );
       inserted++;
     }
-    await saveWorkspace(ws);
+
     return NextResponse.json({
       inserted,
       skippedDuplicates: clean.length - inserted,
     });
   } catch (e) {
-    return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
+    return dbError(e);
   }
 }
 
-// PATCH /api/admin/todos  Body: { id: string, done: boolean }
 export async function PATCH(req: NextRequest) {
   let body: any;
   try {
@@ -94,18 +112,17 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    const ws = await loadWorkspace();
-    const item = ws.todos.find((t) => t.id === body.id);
-    if (!item) return NextResponse.json({ error: "not found" }, { status: 404 });
-    item.done = body.done;
-    await saveWorkspace(ws);
-    return NextResponse.json({ updated: 1 });
+    await ensureSchema();
+    const result = await query<ResultSetHeader>(
+      "UPDATE todos SET done = ? WHERE id = ?",
+      [body.done ? 1 : 0, body.id]
+    );
+    return NextResponse.json({ updated: result.affectedRows });
   } catch (e) {
-    return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
+    return dbError(e);
   }
 }
 
-// DELETE /api/admin/todos  Body: { id: string }
 export async function DELETE(req: NextRequest) {
   let body: any;
   try {
@@ -118,12 +135,10 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
-    const ws = await loadWorkspace();
-    const before = ws.todos.length;
-    ws.todos = ws.todos.filter((t) => t.id !== body.id);
-    await saveWorkspace(ws);
-    return NextResponse.json({ deleted: before - ws.todos.length });
+    await ensureSchema();
+    const result = await query<ResultSetHeader>("DELETE FROM todos WHERE id = ?", [body.id]);
+    return NextResponse.json({ deleted: result.affectedRows });
   } catch (e) {
-    return NextResponse.json({ error: String(e).slice(0, 160) }, { status: 503 });
+    return dbError(e);
   }
 }
