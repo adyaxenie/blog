@@ -8,9 +8,15 @@ export const dynamic = "force-dynamic";
 // badly post-ATT, so true CAC is computed against PostHog installs and the
 // verdict rules lean on watch-time/hook-rate signals, which ATT can't hide.
 
-const FIELDS =
-  "date,campaign,ad_id,ad_name,ad_text,ad_group_name,spend,impressions,clicks,conversions," +
+// Two separate Windsor calls:
+// CREATIVE_FIELDS — no `date` dimension. Omitting date makes Windsor return
+// the full "Real Title _Ad name<ts>" format instead of the bare "Ad name<ts>"
+// fallback it uses when aggregating at daily granularity.
+const CREATIVE_FIELDS =
+  "campaign,ad_id,ad_name,spend,impressions,clicks,conversions," +
   "video_play_actions,video_watched_2s,video_watched_6s,average_video_play";
+// DAILY_FIELDS — with `date` for the spend/CAC time-series chart.
+const DAILY_FIELDS = "date,campaign,spend";
 
 const CAMPAIGN_FILTER = /dailyglowup/i;
 const TESTING_CAMPAIGN = /testing/i;
@@ -39,12 +45,10 @@ const MIN_SPEND_FOR_VERDICT = 20;
 const NO_CONV_KILL_SPEND = 2 * TARGET_CPA;
 
 type WindsorRow = {
-  date: string;
+  date?: string;
   campaign?: string;
   ad_id?: string | number;
   ad_name?: string;
-  ad_text?: string;
-  ad_group_name?: string;
   spend?: number | string;
   impressions?: number | string;
   clicks?: number | string;
@@ -118,22 +122,35 @@ export async function GET(req: NextRequest) {
   `;
 
   try {
-    const url =
+    const base =
       `https://connectors.windsor.ai/tiktok?api_key=${encodeURIComponent(apiKey)}` +
-      `&date_from=${utcDate(days - 1)}&date_to=${utcDate(0)}&fields=${FIELDS}`;
-    const [windsorRes, phRows] = await Promise.all([
-      fetch(url, { next: { revalidate: 600 } }),
+      `&date_from=${utcDate(days - 1)}&date_to=${utcDate(0)}`;
+    // Two separate Windsor calls so we can omit `date` from the creative
+    // call. Including `date` causes Windsor to return bare "Ad name<ts>"
+    // instead of the full "Real Title _Ad name<ts>" format.
+    const [creativeRes, dailyRes, phRows] = await Promise.all([
+      fetch(`${base}&fields=${CREATIVE_FIELDS}`, { next: { revalidate: 600 } }),
+      fetch(`${base}&fields=${DAILY_FIELDS}`, { next: { revalidate: 600 } }),
       posthogQuery(phQuery),
     ]);
-    if (!windsorRes.ok) {
-      const text = await windsorRes.text();
-      return NextResponse.json(
-        { configured: true, error: `Windsor request failed (${windsorRes.status}): ${text.slice(0, 200)}` },
-        { status: 502 }
-      );
+
+    for (const [res, label] of [[creativeRes, "creatives"], [dailyRes, "daily"]] as const) {
+      if (!res.ok) {
+        const text = await res.text();
+        return NextResponse.json(
+          { configured: true, error: `Windsor ${label} request failed (${res.status}): ${text.slice(0, 200)}` },
+          { status: 502 }
+        );
+      }
     }
-    const payload = await windsorRes.json();
-    const rows = ((payload.data ?? []) as WindsorRow[]).filter((r) =>
+
+    const creativePayload = await creativeRes.json();
+    const creativeRows = ((creativePayload.data ?? []) as WindsorRow[]).filter((r) =>
+      CAMPAIGN_FILTER.test(String(r.campaign ?? ""))
+    );
+
+    const dailyPayload = await dailyRes.json();
+    const dailyRows = ((dailyPayload.data ?? []) as WindsorRow[]).filter((r) =>
       CAMPAIGN_FILTER.test(String(r.campaign ?? ""))
     );
 
@@ -142,9 +159,16 @@ export async function GET(req: NextRequest) {
       installsByDay.set(String(row[0]).slice(0, 10), row[1]);
     }
 
-    // First pass: learn which video titles each ad_id carries in this
-    // response (feeds the module-level cache used by title-less responses).
-    for (const r of rows) {
+    // Build spendByDay from the date-granular call (for the CAC chart).
+    const spendByDay = new Map<string, number>();
+    for (const r of dailyRows) {
+      const day = String(r.date).slice(0, 10);
+      spendByDay.set(day, (spendByDay.get(day) ?? 0) + num(r.spend));
+    }
+
+    // First pass: learn which video titles each ad_id carries in the
+    // creative call (no date → Windsor returns "Title _Ad name<ts>" format).
+    for (const r of creativeRows) {
       const id = String(r.ad_id ?? "");
       const rawName = String(r.ad_name ?? "");
       if (id && rawName && !AD_NAME_FALLBACK.test(rawName)) {
@@ -158,11 +182,12 @@ export async function GET(req: NextRequest) {
     }
 
     // Aggregate per ad_id + resolved title. Watch time is play-weighted.
+    // No `date` in this call, so lastActive stays empty; sort falls back to spend.
     type Agg = {
       name: string;
       campaign: string;
       type: "test" | "main";
-      lastActive: string; // latest UTC day with spend
+      lastActive: string;
       spend: number;
       impressions: number;
       clicks: number;
@@ -173,12 +198,9 @@ export async function GET(req: NextRequest) {
       watchSeconds: number; // Σ avg_watch × plays
     };
     const byCreative = new Map<string, Agg>();
-    const spendByDay = new Map<string, number>();
 
-    for (const r of rows) {
+    for (const r of creativeRows) {
       const id = String(r.ad_id ?? r.ad_name ?? "(unknown)");
-      const day = String(r.date).slice(0, 10);
-      spendByDay.set(day, (spendByDay.get(day) ?? 0) + num(r.spend));
 
       const rawName = String(r.ad_name ?? "");
       const fallback = rawName.match(AD_NAME_FALLBACK);
@@ -189,16 +211,6 @@ export async function GET(req: NextRequest) {
       } else if (known && known.size === 1) {
         // Ad has exactly one known video — safe to merge the rolled-up row.
         title = known.values().next().value ?? null;
-      }
-      // When ad_name is a TikTok-generated fallback, use ad_text (the feed
-      // caption) or ad_group_name as a more human-readable label.
-      if (!title) {
-        const caption = String(r.ad_text ?? "").trim();
-        if (caption) title = caption.length > 80 ? caption.slice(0, 77) + "…" : caption;
-      }
-      if (!title) {
-        const grpName = String(r.ad_group_name ?? "").trim();
-        if (grpName) title = grpName;
       }
       const created = fallback ? ` · created ${fallback[1]}` : "";
       const name =
@@ -220,7 +232,6 @@ export async function GET(req: NextRequest) {
         watched6s: 0,
         watchSeconds: 0,
       };
-      if (num(r.spend) > 0 && day > a.lastActive) a.lastActive = day;
       a.spend += num(r.spend);
       a.impressions += num(r.impressions);
       a.clicks += num(r.clicks);
