@@ -4,7 +4,7 @@
  * Used by scheduled Claude when curl/browser is blocked.
  *
  * Usage:
- *   TODO_API_KEY=... DASHBOARD_URL=https://dailyglowup.app node scripts/push-workspace.mjs claude-report/pending-push-2026-07-03.json
+ *   TODO_API_KEY=... DASHBOARD_URL=https://vercel-test-mu-bay.vercel.app node scripts/push-workspace.mjs claude-report/pending-push-2026-07-03.json
  */
 
 import { readFileSync } from "node:fs";
@@ -22,7 +22,7 @@ if (!apiKey) {
   process.exit(1);
 }
 
-const base = (process.env.DASHBOARD_URL || "https://dailyglowup.app").replace(/\/$/, "");
+const base = (process.env.DASHBOARD_URL || "https://vercel-test-mu-bay.vercel.app").replace(/\/$/, "");
 const url = `${base}/api/admin/workspace`;
 
 let body;

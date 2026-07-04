@@ -231,8 +231,21 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
   const section = body.section;
+  if (section === "actions" && body.clearAll === true) {
+    try {
+      await ensureSchema();
+      const result = await query<ResultSetHeader>("DELETE FROM actions");
+      return NextResponse.json({ removed: result.affectedRows, ...(await loadAll()) });
+    } catch (e) {
+      return dbError(e);
+    }
+  }
+
   if (!["todos", "formats"].includes(section) || typeof body.id !== "string") {
-    return NextResponse.json({ error: "provide { section: todos|formats, id }" }, { status: 400 });
+    return NextResponse.json(
+      { error: "provide { section: todos|formats, id } or { section: actions, clearAll: true }" },
+      { status: 400 }
+    );
   }
 
   try {

@@ -121,6 +121,17 @@ export default function WorkSidebar() {
     void fetchWorkspace();
   }
 
+  async function clearActions() {
+    if (!ws?.actions.length) return;
+    setWs({ ...ws, actions: [] });
+    await fetch("/api/admin/workspace", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ section: "actions", clearAll: true }),
+    });
+    void fetchWorkspace();
+  }
+
   async function remove(section: "todos" | "formats", id: string) {
     if (!ws) return;
     setWs({ ...ws, [section]: ws[section].filter((x) => x.id !== id) });
@@ -274,13 +285,24 @@ export default function WorkSidebar() {
             </ul>
           </section>
 
-          {/* Action queue — Claude-managed, read-only */}
+          {/* Action queue — Claude-managed */}
           <section className="border-b border-zinc-800 p-4">
-            <div className="mb-3 flex items-baseline justify-between">
+            <div className="mb-3 flex items-baseline justify-between gap-2">
               <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-400">
                 Action queue
               </h3>
-              <span className="text-[10px] text-zinc-600">{actionCount}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-zinc-600">{actionCount}</span>
+                {actionCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void clearActions()}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
             {(ws?.actions.length ?? 0) === 0 ? (
               <p className="text-xs text-zinc-600">Nothing queued — Claude pushes here.</p>

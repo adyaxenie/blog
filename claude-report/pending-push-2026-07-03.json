@@ -1,31 +1,36 @@
 {
   "source": "claude",
   "todos": [
-    "Confirm the Jun-29 ABO test creative is killed (1.84s watch, $58.56 spent, 0 conversions)",
-    "Film 2-3 new variations of the coach-demo winner format (new scan results + new typed questions)",
-    "Launch fresh $10/day ABO test ad groups - the testing pipeline is currently empty",
-    "Watch the main CBO creative for fatigue: Jul 2 had 0 TikTok conversions and watch time fell to 2.75s"
+    "Film 2-3 new 'Looksmax coach' demo variants (new person's scan, new typed questions) — main winner is fatiguing: 0 conv on $240 Jul 2, ~$155 CPA last 3 days",
+    "Watch ABO test ad (launched 6/29) for 48h; graduate to main CBO if CPA holds under $40 (7d CPA $35.32, $15.80 today)",
+    "Investigate Jul 1 organic install spike (458 installs vs ~200 norm) and try to replicate the source",
+    "If main creative logs another 0-conversion day, cut CBO budget 30-50% until refresh creatives are live"
   ],
   "actions": [
     {
       "severity": "kill",
-      "title": "Kill Jun-29 ABO test creative",
-      "detail": "48h+ of spend ($58.56), 0 conversions, 1.84s avg watch (below 2.5s kill line), 0.5% CTR. No spend since Jun 30 - confirm it's paused."
+      "title": "Main winner fatiguing: $619 spend, 4 conv last 3 days (~$155 CPA)",
+      "detail": "Ad 2026-04-29: 0 conv on $239.78 Jul 2, 1 conv on $139.68 Jul 3. Watch time slid 3.94s to 2.41s. 7d CPA $49.21 vs ~$32 norm. Refresh or cut budget."
     },
     {
-      "severity": "test",
-      "title": "Winner showing fatigue - refresh with variations",
-      "detail": "Apr-29 coach-demo creative: 7d CPA $49.26 vs ~$32 historical. Jul 2: $239.78 spend, 0 TikTok conversions, watch dropped to 2.75s from 3.5s avg."
+      "severity": "scale",
+      "title": "ABO test at $35.32 CPA, $15.80 today — graduation candidate",
+      "detail": "Test ad (6/29): 3 conv on $47.41 today after 2 zero days. 7d: $105.95, 3 conv. Watch 1.95s is weak; verify 48h more before moving to CBO."
     },
     {
       "severity": "info",
-      "title": "Concentration risk: 100% of daily spend on one creative",
-      "detail": "All $239.78 of Jul 2 DailyGlowUp spend ran on the single Apr-29 CBO creative (>70% threshold). No active backup or test creatives."
+      "title": "93% of 7d spend on one creative",
+      "detail": "Main ad took $1,574.58 of $1,685 total (7d). Over the 70% concentration threshold and pipeline has only 1 active test."
+    },
+    {
+      "severity": "info",
+      "title": "Jul 1 organic spike: 458 installs vs ~200 norm",
+      "detail": "Spend was flat (~$240), so spike is organic. 7d: 1,703 installs, 91.6% onboarding completion, blended CAC ~$0.99."
     }
   ],
   "formats": [
-    "Coach demo variation: type 'What's my worst feature' into the AI coach, show a new person's scan results, scores, and routine",
-    "Coach demo variation: type 'Am I cooked or is there hope', reveal a different person's scan scores then the fix routine",
-    "Coach demo variation: type 'Rate me honestly', screen-record the coach reply, scan scores, and recommended routine"
+    "Coach demo variant: type 'Am I cooked or is there hope' into AI coach, show new person's scan, scores, routine",
+    "Coach demo variant: 'Rate me honestly' with a male scan, same screen-recording flow",
+    "Coach demo variant: 'What's my worst feature' ending on potential score reveal instead of routine"
   ]
 }
