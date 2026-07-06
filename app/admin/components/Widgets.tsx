@@ -26,24 +26,61 @@ export const RANGES = [
   { label: "3M", days: 90 },
 ] as const;
 
+// Module-level caches shared across all useApi callers for the browser session.
+// Keyed by request path, which already encodes the timeframe (?days=N), so a new
+// timeframe is a cache miss and refetches while tab switches reuse cached data.
+const apiCache = new Map<string, unknown>();
+const inflight = new Map<string, Promise<unknown>>();
+
+async function loadApi<T>(path: string): Promise<T> {
+  const r = await fetch(path);
+  const json = await r.json();
+  if (json.error && !json.configured) throw new Error(json.error);
+  if (!r.ok) throw new Error(json.error ?? `Request failed (${r.status})`);
+  return json as T;
+}
+
 export function useApi<T>(path: string) {
-  const [data, setData] = useState<T | null>(null);
+  const cached = apiCache.get(path) as T | undefined;
+  const [data, setData] = useState<T | null>(cached ?? null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cached === undefined);
   useEffect(() => {
+    const hit = apiCache.get(path) as T | undefined;
+    if (hit !== undefined) {
+      setData(hit);
+      setError("");
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError("");
-    fetch(path)
-      .then(async (r) => {
-        const json = await r.json();
-        if (cancelled) return;
-        if (json.error && !json.configured) setError(json.error);
-        else if (!r.ok) setError(json.error ?? `Request failed (${r.status})`);
-        else setData(json);
+
+    let promise = inflight.get(path) as Promise<T> | undefined;
+    if (!promise) {
+      promise = loadApi<T>(path);
+      inflight.set(path, promise);
+      // Cache successful results; leave errors uncached so they retry on remount.
+      promise
+        .then((json) => apiCache.set(path, json))
+        .catch(() => {})
+        .finally(() => {
+          if (inflight.get(path) === promise) inflight.delete(path);
+        });
+    }
+
+    promise
+      .then((json) => {
+        if (!cancelled) setData(json);
       })
-      .catch((e) => !cancelled && setError(String(e)))
-      .finally(() => !cancelled && setLoading(false));
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
     return () => {
       cancelled = true;
     };
@@ -426,24 +463,117 @@ export function DailyBrief() {
 
 // ---------- Economics: spend vs revenue overlay + blended CAC ----------
 
+const ECO_LINES = [
+  {
+    key: "spend" as const,
+    label: "Spend",
+    dot: "bg-rose-400",
+    stroke: "#fb7185",
+    name: "Spend",
+  },
+  {
+    key: "revenue" as const,
+    label: "Revenue",
+    dot: "bg-emerald-400",
+    stroke: "#34d399",
+    name: "Revenue (gross)",
+    dash: "4 3",
+  },
+  {
+    key: "proceeds" as const,
+    label: "Profit",
+    dot: "bg-sky-400",
+    stroke: "#38bdf8",
+    name: "Profit (after Apple 15%)",
+  },
+];
+
+type EcoLineKey = (typeof ECO_LINES)[number]["key"];
+
+const DEFAULT_ECO_LINES: Record<EcoLineKey, boolean> = {
+  spend: true,
+  revenue: true,
+  proceeds: false,
+};
+
+function EcoLineToggles({
+  lines,
+  onToggle,
+}: {
+  lines: Record<EcoLineKey, boolean>;
+  onToggle: (key: EcoLineKey) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {ECO_LINES.map((line) => {
+        const on = lines[line.key];
+        return (
+          <button
+            key={line.key}
+            type="button"
+            onClick={() => onToggle(line.key)}
+            className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] transition-colors ${
+              on
+                ? "border-zinc-700 bg-zinc-800/80 text-zinc-200"
+                : "border-transparent text-zinc-600 hover:border-zinc-800 hover:text-zinc-400"
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${line.dot} ${on ? "opacity-100" : "opacity-30"}`}
+            />
+            {line.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 type EcoData = {
   configured: boolean;
   error?: string;
   bucket?: "day" | "week";
-  series?: { date: string; label: string; spend: number; revenue: number; transactions: number }[];
-  totals?: { spend: number; revenue: number; transactions: number; net: number; cacProxy: number | null };
+  series?: {
+    date: string;
+    label: string;
+    spend: number;
+    revenue: number;
+    proceeds: number;
+    transactions: number;
+  }[];
+  totals?: {
+    spend: number;
+    revenue: number;
+    proceeds: number;
+    transactions: number;
+    net: number;
+    cacProxy: number | null;
+  };
   blended?: { spend28d: number; newCustomers28d: number; cac: number | null };
 };
 
 export function EconomicsOverlay({ days }: { days: number }) {
   const { data, error, loading } = useApi<EcoData>(`/api/admin/economics?days=${days}`);
+  const [lines, setLines] = useState(DEFAULT_ECO_LINES);
   const series = data?.series ?? [];
   const t = data?.totals;
   const meta = t
-    ? `net ${t.net < 0 ? "-" : ""}${fmtMoney(Math.abs(Math.round(t.net)))}${
+    ? `net ${t.net < 0 ? "-" : ""}${fmtMoney(Math.abs(Math.round(t.net)))} after Apple 15%${
         data?.bucket === "week" ? " · weekly buckets" : ""
       } · UTC`
     : "UTC";
+
+  function toggleLine(key: EcoLineKey) {
+    setLines((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  const visibleLines = ECO_LINES.filter((line) => lines[line.key]);
+  const singleDay = series[0];
+  const singleDayColor: Record<EcoLineKey, string> = {
+    spend: "text-rose-400",
+    revenue: "text-emerald-400",
+    proceeds: "text-sky-400",
+  };
 
   return (
     <Panel title="Spend vs revenue" meta={meta}>
@@ -487,54 +617,74 @@ export function EconomicsOverlay({ days }: { days: number }) {
             </div>
           )}
           {series.length < 2 ? (
-            <div className="flex h-56 flex-col items-center justify-center gap-1">
-              <p className="text-2xl font-semibold tabular-nums">
-                <span className="text-rose-400">{fmtMoney(Math.round(series[0]?.spend ?? 0))}</span>
-                <span className="mx-2 text-zinc-600">vs</span>
-                <span className="text-emerald-400">{fmtMoney(Math.round(series[0]?.revenue ?? 0))}</span>
-              </p>
-              <p className="text-xs text-zinc-500">{series[0]?.date ?? "today"} · spend vs revenue</p>
+            <div className="flex h-56 flex-col items-center justify-center gap-2">
+              {visibleLines.length > 0 ? (
+                <p className="text-2xl font-semibold tabular-nums">
+                  {visibleLines.map((line, i) => (
+                    <span key={line.key}>
+                      {i > 0 && <span className="mx-2 text-zinc-600">·</span>}
+                      <span className={singleDayColor[line.key]}>
+                        {fmtMoney(Math.round(singleDay?.[line.key] ?? 0))}
+                      </span>
+                    </span>
+                  ))}
+                </p>
+              ) : (
+                <p className="text-xs text-zinc-500">Select at least one line</p>
+              )}
+              <p className="text-xs text-zinc-500">{singleDay?.date ?? "today"}</p>
+              <EcoLineToggles lines={lines} onToggle={toggleLine} />
             </div>
           ) : (
             <>
+              <div className="mb-2">
+                <EcoLineToggles lines={lines} onToggle={toggleLine} />
+              </div>
               <div className="relative h-56">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={series} margin={{ top: 4, right: 4, bottom: 0, left: -12 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                    <XAxis dataKey="label" {...axisProps} />
-                    <YAxis {...axisProps} tickFormatter={(v: number) => `$${v}`} />
-                    <Tooltip
-                      contentStyle={tooltipStyle}
-                      formatter={(v, name) => [fmtMoney(Math.round(Number(v))), String(name)]}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="revenue"
-                      stroke="#34d399"
-                      strokeWidth={1.5}
-                      dot={series.length <= 7 ? { r: 3, fill: "#34d399", strokeWidth: 0 } : false}
-                      name="Revenue"
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="spend"
-                      stroke="#fb7185"
-                      strokeWidth={1.5}
-                      dot={series.length <= 7 ? { r: 3, fill: "#fb7185", strokeWidth: 0 } : false}
-                      name="Spend"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                {visibleLines.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-xs text-zinc-500">
+                    Select at least one line
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={series} margin={{ top: 4, right: 4, bottom: 0, left: -12 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                      <XAxis dataKey="label" {...axisProps} />
+                      <YAxis {...axisProps} tickFormatter={(v: number) => `$${v}`} />
+                      <Tooltip
+                        contentStyle={tooltipStyle}
+                        formatter={(v, name) => [fmtMoney(Math.round(Number(v))), String(name)]}
+                      />
+                      {ECO_LINES.map(
+                        (line) =>
+                          lines[line.key] && (
+                            <Line
+                              key={line.key}
+                              type="monotone"
+                              dataKey={line.key}
+                              stroke={line.stroke}
+                              strokeWidth={1.5}
+                              strokeDasharray={line.dash}
+                              dot={
+                                series.length <= 7
+                                  ? { r: 3, fill: line.stroke, strokeWidth: 0 }
+                                  : false
+                              }
+                              name={line.name}
+                            />
+                          )
+                      )}
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
               </div>
-              <div className="mt-2 flex gap-4 text-[10px] text-zinc-500">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> Revenue
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-rose-400" /> Spend
-                </span>
-                <span className="text-zinc-600">breakeven where the lines cross</span>
-              </div>
+              <p className="mt-2 text-[10px] text-zinc-600">
+                {lines.spend && lines.proceeds
+                  ? "breakeven where profit crosses spend"
+                  : lines.spend && lines.revenue
+                    ? "breakeven where revenue crosses spend"
+                    : "toggle lines to compare"}
+              </p>
             </>
           )}
         </>

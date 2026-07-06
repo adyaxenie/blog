@@ -16,10 +16,12 @@ import {
   WeeklyReport,
 } from "./components/Widgets";
 import { TikTokAdsTab } from "./components/TikTokAds";
+import { ProjectionsTab } from "./components/Projections";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "tiktok", label: "TikTok Ads" },
+  { id: "projections", label: "Projections" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -106,8 +108,10 @@ export default function AdminDashboard() {
 
               <RcHealthPanels days={days} />
             </>
-          ) : (
+          ) : tab === "tiktok" ? (
             <TikTokAdsTab days={days} />
+          ) : (
+            <ProjectionsTab />
           )}
         </div>
 

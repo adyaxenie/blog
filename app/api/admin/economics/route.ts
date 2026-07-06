@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  APPLE_PROCEEDS_RATE,
   ConfigError,
   fetchRcChart,
   fetchRcOverview,
@@ -31,28 +32,47 @@ export async function GET(req: NextRequest) {
     const revenueByDay = new Map(revenueChart.map((r) => [r.date, r]));
 
     // Daily series across the selected range (missing days → 0).
-    const daily: { date: string; spend: number; revenue: number; transactions: number }[] = [];
+    const daily: {
+      date: string;
+      spend: number;
+      revenue: number;
+      proceeds: number;
+      transactions: number;
+    }[] = [];
     for (let i = days - 1; i >= 0; i--) {
       const date = utcDate(i);
       const rc = revenueByDay.get(date);
+      const revenue = round2(rc?.measures[0] ?? 0);
       daily.push({
         date,
         spend: round2(spendByDay.get(date) ?? 0),
-        revenue: round2(rc?.measures[0] ?? 0),
+        revenue,
+        proceeds: round2(revenue * APPLE_PROCEEDS_RATE),
         transactions: rc?.measures[1] ?? 0,
       });
     }
 
     // Bucket weekly (Monday UTC) for long ranges so the overlay stays readable.
     const bucket: "day" | "week" = days >= 30 ? "week" : "day";
-    let series: { date: string; label: string; spend: number; revenue: number; transactions: number }[];
+    let series: {
+      date: string;
+      label: string;
+      spend: number;
+      revenue: number;
+      proceeds: number;
+      transactions: number;
+    }[];
     if (bucket === "week") {
-      const byWeek = new Map<string, { spend: number; revenue: number; transactions: number }>();
+      const byWeek = new Map<
+        string,
+        { spend: number; revenue: number; proceeds: number; transactions: number }
+      >();
       for (const d of daily) {
         const wk = mondayOf(d.date);
-        const e = byWeek.get(wk) ?? { spend: 0, revenue: 0, transactions: 0 };
+        const e = byWeek.get(wk) ?? { spend: 0, revenue: 0, proceeds: 0, transactions: 0 };
         e.spend += d.spend;
         e.revenue += d.revenue;
+        e.proceeds += d.proceeds;
         e.transactions += d.transactions;
         byWeek.set(wk, e);
       }
@@ -63,6 +83,7 @@ export async function GET(req: NextRequest) {
           label: date.slice(5, 10),
           spend: round2(m.spend),
           revenue: round2(m.revenue),
+          proceeds: round2(m.proceeds),
           transactions: m.transactions,
         }));
     } else {
@@ -73,9 +94,10 @@ export async function GET(req: NextRequest) {
       (acc, d) => ({
         spend: acc.spend + d.spend,
         revenue: acc.revenue + d.revenue,
+        proceeds: acc.proceeds + d.proceeds,
         transactions: acc.transactions + d.transactions,
       }),
-      { spend: 0, revenue: 0, transactions: 0 }
+      { spend: 0, revenue: 0, proceeds: 0, transactions: 0 }
     );
 
     // Blended CAC: last-28d spend / last-28d new customers (matched windows).
@@ -91,8 +113,9 @@ export async function GET(req: NextRequest) {
       totals: {
         spend: round2(totals.spend),
         revenue: round2(totals.revenue),
+        proceeds: round2(totals.proceeds),
         transactions: totals.transactions,
-        net: round2(totals.revenue - totals.spend),
+        net: round2(totals.proceeds - totals.spend),
         cacProxy: totals.transactions > 0 ? round2(totals.spend / totals.transactions) : null,
       },
       blended: {

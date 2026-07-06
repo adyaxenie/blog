@@ -5,6 +5,9 @@ const RC_BASE = "https://api.revenuecat.com/v2";
 
 export const ALLOWED_DAYS = new Set([1, 7, 14, 30, 90]);
 
+/** Gross revenue × this rate ≈ App Store proceeds after Apple's 15% cut. */
+export const APPLE_PROCEEDS_RATE = 0.85;
+
 export function pickDays(param: string | null, fallback = 30): number {
   const n = Number(param);
   return ALLOWED_DAYS.has(n) ? n : fallback;
