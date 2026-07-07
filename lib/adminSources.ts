@@ -13,6 +13,15 @@ export function pickDays(param: string | null, fallback = 30): number {
   return ALLOWED_DAYS.has(n) ? n : fallback;
 }
 
+/** Client sends `?refresh=1` to bypass Next.js upstream fetch cache. */
+export function wantsFreshRefresh(params: URLSearchParams | null | undefined): boolean {
+  return params?.get("refresh") === "1";
+}
+
+export function upstreamCache(fresh: boolean, revalidate = 300): RequestInit {
+  return fresh ? { cache: "no-store" } : { next: { revalidate } };
+}
+
 // UTC calendar date, N days back.
 export function utcDate(daysBack: number): string {
   return new Date(Date.now() - daysBack * 86_400_000).toISOString().slice(0, 10);
@@ -58,11 +67,11 @@ export type RcChartDay = { date: string; incomplete: boolean; measures: number[]
 // RC chart responses: .values is {cohort unix-seconds UTC, measure index, value}
 // triples at daily resolution. Returns one row per day, sorted ascending, with
 // values indexed by measure.
-export async function fetchRcChart(name: string): Promise<RcChartDay[]> {
+export async function fetchRcChart(name: string, fresh = false): Promise<RcChartDay[]> {
   const { apiKey, projectId } = rcEnv();
   const res = await fetch(`${RC_BASE}/projects/${projectId}/charts/${name}`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-    next: { revalidate: 300 },
+    ...upstreamCache(fresh, 300),
   });
   if (!res.ok) throw new Error(`RevenueCat charts/${name} failed (${res.status})`);
   const chart = await res.json();
@@ -87,11 +96,11 @@ export async function fetchRcChart(name: string): Promise<RcChartDay[]> {
 
 export type RcOverviewMetric = { id: string; name: string; value: number; unit: string; description: string };
 
-export async function fetchRcOverview(): Promise<RcOverviewMetric[]> {
+export async function fetchRcOverview(fresh = false): Promise<RcOverviewMetric[]> {
   const { apiKey, projectId } = rcEnv();
   const res = await fetch(`${RC_BASE}/projects/${projectId}/metrics/overview`, {
     headers: { Authorization: `Bearer ${apiKey}` },
-    next: { revalidate: 300 },
+    ...upstreamCache(fresh, 300),
   });
   if (!res.ok) throw new Error(`RevenueCat overview failed (${res.status})`);
   const data = await res.json();
@@ -99,7 +108,11 @@ export async function fetchRcOverview(): Promise<RcOverviewMetric[]> {
 }
 
 // Windsor TikTok daily spend, inclusive date range → Map<YYYY-MM-DD, spend>.
-export async function fetchWindsorSpend(dateFrom: string, dateTo: string): Promise<Map<string, number>> {
+export async function fetchWindsorSpend(
+  dateFrom: string,
+  dateTo: string,
+  fresh = false
+): Promise<Map<string, number>> {
   const apiKey = process.env.WINDSOR_API_KEY;
   if (!apiKey || apiKey.startsWith("REPLACE")) {
     throw new ConfigError("Set WINDSOR_API_KEY (from windsor.ai account settings) in .env.local");
@@ -107,7 +120,7 @@ export async function fetchWindsorSpend(dateFrom: string, dateTo: string): Promi
   const url =
     `https://connectors.windsor.ai/tiktok?api_key=${encodeURIComponent(apiKey)}` +
     `&date_from=${dateFrom}&date_to=${dateTo}&fields=date,spend`;
-  const res = await fetch(url, { next: { revalidate: 600 } });
+  const res = await fetch(url, upstreamCache(fresh, 600));
   if (!res.ok) throw new Error(`Windsor request failed (${res.status})`);
   const payload = await res.json();
   const byDay = new Map<string, number>();
@@ -120,7 +133,7 @@ export async function fetchWindsorSpend(dateFrom: string, dateTo: string): Promi
 }
 
 // Run a HogQL query against the PostHog project; returns raw result rows.
-export async function posthogQuery(query: string): Promise<unknown[][]> {
+export async function posthogQuery(query: string, fresh = false): Promise<unknown[][]> {
   const apiKey = process.env.POSTHOG_API_KEY;
   const host = process.env.POSTHOG_HOST ?? "https://us.posthog.com";
   const projectId = process.env.POSTHOG_PROJECT_ID;
@@ -134,7 +147,7 @@ export async function posthogQuery(query: string): Promise<unknown[][]> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
-    next: { revalidate: 300 },
+    ...upstreamCache(fresh, 300),
   });
   if (!res.ok) {
     const text = await res.text();

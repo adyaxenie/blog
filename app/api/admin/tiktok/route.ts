@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { upstreamCache, wantsFreshRefresh } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
@@ -37,12 +38,13 @@ export async function GET(req: NextRequest) {
 
   const daysParam = Number(req.nextUrl.searchParams.get("days"));
   const days = ALLOWED_DAYS.has(daysParam) ? daysParam : 30;
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
 
   try {
     const url =
       `https://connectors.windsor.ai/tiktok?api_key=${encodeURIComponent(apiKey)}` +
       `&date_from=${utcDate(days - 1)}&date_to=${utcDate(0)}&fields=${FIELDS}`;
-    const res = await fetch(url, { next: { revalidate: 600 } });
+    const res = await fetch(url, upstreamCache(fresh, 600));
 
     if (!res.ok) {
       const text = await res.text();

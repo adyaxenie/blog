@@ -1,5 +1,4 @@
 import mysql from "mysql2/promise";
-import type { RowDataPacket } from "mysql2/promise";
 
 export type QueryResult = mysql.RowDataPacket[] | mysql.ResultSetHeader;
 
@@ -74,14 +73,6 @@ export function isMysqlConfigured(): boolean {
 
 let schemaReady: Promise<void> | null = null;
 
-export const SEED_FORMATS = [
-  "Same flow as the top-spend winner, different person's scan. Type “What's my worst feature” — show a scan with one visibly low category score.",
-  "Different person's scan. Type “Am I cooked or is there hope” — show overall ~45–50 vs potential 70+, linger on the gap.",
-  "Different person's scan. Type “How far am I from my potential” — skip score lingering, go straight to the routine/diet recommendations.",
-  "Different person's scan. Type “Rate me honestly” — mid overall score, slow scroll through every category breakdown.",
-  "Same scan as the winner. Type “What should I fix first” — reorder to lead with the single lowest category before the full dashboard.",
-];
-
 export async function ensureSchema(): Promise<void> {
   if (!schemaReady) {
     schemaReady = (async () => {
@@ -119,17 +110,4 @@ export async function ensureSchema(): Promise<void> {
     })();
   }
   await schemaReady;
-}
-
-export async function seedFormatsIfEmpty(): Promise<void> {
-  await ensureSchema();
-  const rows = await query<RowDataPacket[]>("SELECT COUNT(*) AS n FROM formats");
-  if (Number((rows[0] as { n: number }).n) > 0) return;
-  const now = Date.now();
-  for (let i = 0; i < SEED_FORMATS.length; i++) {
-    await query(
-      "INSERT INTO formats (id, text, done, source, created_at) VALUES (?, ?, 0, 'manual', ?)",
-      [crypto.randomUUID(), SEED_FORMATS[i], now + (SEED_FORMATS.length - i)]
-    );
-  }
 }

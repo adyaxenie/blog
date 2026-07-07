@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConfigError, pickDays, posthogQuery } from "@/lib/adminSources";
+import { ConfigError, pickDays, posthogQuery, wantsFreshRefresh } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +13,7 @@ const STEPS = [
 
 export async function GET(req: NextRequest) {
   const days = pickDays(req.nextUrl.searchParams.get("days"));
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
   const interval = days === 1 ? "INTERVAL 24 HOUR" : `INTERVAL ${days} DAY`;
   const eventList = STEPS.map((s) => `'${s.event}'`).join(", ");
   const selects = STEPS.map(
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
   `;
 
   try {
-    const rows = await posthogQuery(query);
+    const rows = await posthogQuery(query, fresh);
     const counts = (rows[0] ?? []).map((v) => Number(v) || 0);
     const first = counts[0] ?? 0;
     const steps = STEPS.map((s, i) => {

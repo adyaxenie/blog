@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { ResultSetHeader, RowDataPacket } from "mysql2/promise";
-import { ensureSchema, isMysqlConfigured, query, seedFormatsIfEmpty } from "@/lib/mysql";
+import { ensureSchema, isMysqlConfigured, query } from "@/lib/mysql";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +35,6 @@ type FormatRow = RowDataPacket & {
 
 async function loadAll() {
   await ensureSchema();
-  await seedFormatsIfEmpty();
   const [todos, actions, formats] = await Promise.all([
     query<TodoRow[]>(
       "SELECT id, text, done, source, created_at FROM todos ORDER BY done ASC, created_at DESC LIMIT ?",

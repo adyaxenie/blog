@@ -361,11 +361,10 @@ export default function WorkSidebar() {
                   </button>
                 </li>
               ))}
+              {loaded && (ws?.formats.length ?? 0) === 0 && (
+                <li className="px-1.5 py-1 text-xs text-zinc-600">Nothing queued — Claude pushes here.</li>
+              )}
             </ol>
-            <p className="mt-3 border-t border-zinc-800/60 pt-3 text-[10px] leading-relaxed text-zinc-600">
-              Film all in one session. Each in its own ABO ad group at $10/day, 48h. Kill under 2.5s
-              watch time, promote survivors to the main CBO.
-            </p>
           </section>
         </div>
       </div>

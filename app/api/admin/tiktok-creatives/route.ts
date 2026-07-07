@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConfigError, fetchRcChart, pickDays, posthogQuery, round2, utcDate } from "@/lib/adminSources";
+import { ConfigError, fetchRcChart, pickDays, posthogQuery, round2, upstreamCache, utcDate, wantsFreshRefresh } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
@@ -120,6 +120,7 @@ export async function GET(req: NextRequest) {
     });
   }
   const days = pickDays(req.nextUrl.searchParams.get("days"));
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
 
   const phQuery = `
     SELECT
@@ -137,9 +138,9 @@ export async function GET(req: NextRequest) {
       `https://connectors.windsor.ai/tiktok?api_key=${encodeURIComponent(apiKey)}` +
       `&date_from=${utcDate(days - 1)}&date_to=${utcDate(0)}&fields=${FIELDS}`;
     const [windsorRes, phRows, payingChart] = await Promise.all([
-      fetch(url, { next: { revalidate: 600 } }),
-      posthogQuery(phQuery),
-      fetchRcChart("conversion_to_paying").catch(() => null),
+      fetch(url, upstreamCache(fresh, 600)),
+      posthogQuery(phQuery, fresh),
+      fetchRcChart("conversion_to_paying", fresh).catch(() => null),
     ]);
 
     if (!windsorRes.ok) {

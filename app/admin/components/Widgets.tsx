@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -9,7 +9,6 @@ import {
   Area,
   BarChart,
   Bar,
-  Cell,
   XAxis,
   YAxis,
   Tooltip,
@@ -31,9 +30,63 @@ export const RANGES = [
 // timeframe is a cache miss and refetches while tab switches reuse cached data.
 const apiCache = new Map<string, unknown>();
 const inflight = new Map<string, Promise<unknown>>();
+let refreshPending = false;
 
-async function loadApi<T>(path: string): Promise<T> {
-  const r = await fetch(path);
+type MetricsRefreshContextValue = {
+  refreshTick: number;
+  refreshing: boolean;
+  refresh: () => void;
+};
+
+const MetricsRefreshContext = createContext<MetricsRefreshContextValue>({
+  refreshTick: 0,
+  refreshing: false,
+  refresh: () => {},
+});
+
+export function MetricsRefreshProvider({ children }: { children: React.ReactNode }) {
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = useCallback(() => {
+    apiCache.clear();
+    inflight.clear();
+    refreshPending = true;
+    setRefreshing(true);
+    setRefreshTick((t) => t + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!refreshing) return;
+    const id = setInterval(() => {
+      if (inflight.size === 0) {
+        refreshPending = false;
+        setRefreshing(false);
+        clearInterval(id);
+      }
+    }, 100);
+    return () => clearInterval(id);
+  }, [refreshing, refreshTick]);
+
+  return (
+    <MetricsRefreshContext.Provider value={{ refreshTick, refreshing, refresh }}>
+      {children}
+    </MetricsRefreshContext.Provider>
+  );
+}
+
+export function useMetricsRefresh() {
+  return useContext(MetricsRefreshContext);
+}
+
+function withRefreshParam(path: string, fresh: boolean): string {
+  if (!fresh) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}refresh=1`;
+}
+
+async function loadApi<T>(path: string, fresh = false): Promise<T> {
+  const r = await fetch(withRefreshParam(path, fresh));
   const json = await r.json();
   if (json.error && !json.configured) throw new Error(json.error);
   if (!r.ok) throw new Error(json.error ?? `Request failed (${r.status})`);
@@ -41,10 +94,12 @@ async function loadApi<T>(path: string): Promise<T> {
 }
 
 export function useApi<T>(path: string) {
+  const { refreshTick, refresh } = useMetricsRefresh();
   const cached = apiCache.get(path) as T | undefined;
   const [data, setData] = useState<T | null>(cached ?? null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(cached === undefined);
+
   useEffect(() => {
     const hit = apiCache.get(path) as T | undefined;
     if (hit !== undefined) {
@@ -57,9 +112,10 @@ export function useApi<T>(path: string) {
     setLoading(true);
     setError("");
 
+    const fresh = refreshPending;
     let promise = inflight.get(path) as Promise<T> | undefined;
     if (!promise) {
-      promise = loadApi<T>(path);
+      promise = loadApi<T>(path, fresh);
       inflight.set(path, promise);
       // Cache successful results; leave errors uncached so they retry on remount.
       promise
@@ -84,8 +140,9 @@ export function useApi<T>(path: string) {
     return () => {
       cancelled = true;
     };
-  }, [path]);
-  return { data, error, loading };
+  }, [path, refreshTick]);
+
+  return { data, error, loading, refresh };
 }
 
 export function Panel({
@@ -608,11 +665,15 @@ export function EconomicsOverlay({ days }: { days: number }) {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-zinc-500">CAC proxy · range</p>
+                <p className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Spend per transaction · range
+                </p>
                 <p className="text-sm font-semibold tabular-nums text-zinc-100">
                   {t.cacProxy != null ? fmtMoney2(t.cacProxy) : "—"}
                 </p>
-                <p className="text-[10px] tabular-nums text-zinc-600">spend / transactions</p>
+                <p className="text-[10px] tabular-nums text-zinc-600">
+                  spend / transactions · incl. renewals
+                </p>
               </div>
             </div>
           )}
@@ -864,10 +925,6 @@ export function WeeklyReport() {
 type RcHealthData = {
   configured: boolean;
   error?: string;
-  churn?: {
-    series: { date: string; label: string; actives: number; churned: number; rate: number }[];
-    totalChurned: number;
-  } | null;
   refunds?: {
     series: { date: string; label: string; transactions: number; refunded: number; rate: number }[];
     totalRefunded: number;
@@ -877,17 +934,6 @@ type RcHealthData = {
     series: { date: string; label: string; newCustomers: number; paying: number; rate: number }[];
     totalPaying: number;
     overallRate: number | null;
-  } | null;
-  movement?: {
-    series: {
-      date: string;
-      label: string;
-      newActives: number;
-      resubscribed: number;
-      churned: number;
-      movement: number;
-    }[];
-    net: number;
   } | null;
 };
 
@@ -928,20 +974,15 @@ export function RcHealthPanels({ days }: { days: number }) {
   if (loading || !data) {
     return (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {Array.from({ length: 4 }).map((_, i) => (
+        {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="h-56 animate-pulse rounded-xl bg-zinc-800/50" />
         ))}
       </div>
     );
   }
-  const { churn, refunds, conversion, movement } = data;
+  const { refunds, conversion } = data;
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      {churn && (
-        <Panel title="Churn rate" meta={`${churn.totalChurned.toLocaleString()} churned · UTC`}>
-          <RateLine series={churn.series} color="#fbbf24" name="Churn rate" />
-        </Panel>
-      )}
       {refunds && (
         <Panel
           title="Refund rate"
@@ -960,32 +1001,6 @@ export function RcHealthPanels({ days }: { days: number }) {
           } · UTC`}
         >
           <RateLine series={conversion.series} color="#34d399" name="Conversion rate" />
-        </Panel>
-      )}
-      {movement && (
-        <Panel
-          title="Actives movement"
-          meta={`net ${movement.net >= 0 ? "+" : ""}${movement.net.toLocaleString()} · UTC`}
-        >
-          <div className="relative h-40">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={movement.series} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                <XAxis dataKey="label" {...axisProps} />
-                <YAxis {...axisProps} />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(v) => [Number(v), "Net movement"]}
-                  cursor={{ fill: "#27272a", opacity: 0.4 }}
-                />
-                <Bar dataKey="movement" radius={[2, 2, 0, 0]} maxBarSize={24}>
-                  {movement.series.map((s) => (
-                    <Cell key={s.date} fill={s.movement >= 0 ? "#34d399" : "#fb7185"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
         </Panel>
       )}
     </div>

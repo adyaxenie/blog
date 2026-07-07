@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   ConfigError,
   fetchRcChart,
@@ -6,6 +6,7 @@ import {
   posthogQuery,
   round2,
   utcDate,
+  wantsFreshRefresh,
 } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,8 @@ export const dynamic = "force-dynamic";
 
 type DayNums = { installs: number; viewed: number; continued: number };
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
   const yesterday = utcDate(1);
   // Baseline: utcDate(8) .. utcDate(2), 7 full UTC days.
   const baselineDates = Array.from({ length: 7 }, (_, i) => utcDate(8 - i));
@@ -36,9 +38,9 @@ export async function GET() {
 
   try {
     const [spendByDay, revenueChart, phRows] = await Promise.all([
-      fetchWindsorSpend(utcDate(8), yesterday),
-      fetchRcChart("revenue"),
-      posthogQuery(phQuery),
+      fetchWindsorSpend(utcDate(8), yesterday, fresh),
+      fetchRcChart("revenue", fresh),
+      posthogQuery(phQuery, fresh),
     ]);
 
     const rcByDay = new Map(revenueChart.map((r) => [r.date, r]));
@@ -123,7 +125,7 @@ export async function GET() {
       },
       {
         key: "cac",
-        label: "CAC proxy",
+        label: "Spend / txn",
         kind: "money2",
         value: yCac != null ? round2(yCac) : null,
         baseline: baseCac != null ? round2(baseCac) : null,

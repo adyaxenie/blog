@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   APPLE_PROCEEDS_RATE,
   ConfigError,
@@ -6,6 +6,7 @@ import {
   fetchWindsorSpend,
   round2,
   utcDate,
+  wantsFreshRefresh,
 } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,8 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 // Monthly P&L actuals (calendar months, UTC) plus the run-rate basis the
 // Projections tab uses to model scenarios: revenue = spend × ROAS,
 // proceeds = revenue × 0.85, gross profit = proceeds − spend.
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
   // First day of the calendar month 5 months back → up to 6 month columns.
   const now = new Date();
   const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1))
@@ -25,8 +27,8 @@ export async function GET() {
 
   try {
     const [spendByDay, revenueChart] = await Promise.all([
-      fetchWindsorSpend(from, today),
-      fetchRcChart("revenue"),
+      fetchWindsorSpend(from, today, fresh),
+      fetchRcChart("revenue", fresh),
     ]);
     const revenueByDay = new Map(revenueChart.map((r) => [r.date, r.measures[0] ?? 0]));
 

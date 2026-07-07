@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   ConfigError,
   addDays,
@@ -9,13 +9,15 @@ import {
   posthogQuery,
   round2,
   utcDate,
+  wantsFreshRefresh,
 } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
 // Weekly report: last 4 complete UTC weeks (Mon–Sun). Fixed window — ignores
 // the range selector.
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
   const currentMonday = mondayOf(utcDate(0)); // Monday of the in-progress week
   const weekStarts = [4, 3, 2, 1].map((i) => addDays(currentMonday, -7 * i));
   const firstDay = weekStarts[0];
@@ -39,9 +41,9 @@ export async function GET() {
 
   try {
     const [spendByDay, revenueChart, phRows] = await Promise.all([
-      fetchWindsorSpend(firstDay, lastDay),
-      fetchRcChart("revenue"),
-      posthogQuery(phQuery),
+      fetchWindsorSpend(firstDay, lastDay, fresh),
+      fetchRcChart("revenue", fresh),
+      posthogQuery(phQuery, fresh),
     ]);
 
     const phByWeek = new Map<string, { installs: number; completed: number; viewed: number; continued: number }>();

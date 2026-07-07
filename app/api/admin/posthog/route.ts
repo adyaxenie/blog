@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { upstreamCache, wantsFreshRefresh } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
 
   const daysParam = Number(req.nextUrl.searchParams.get("days"));
   const days = ALLOWED_DAYS.has(daysParam) ? daysParam : 30;
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
 
   try {
     const res = await fetch(`${host}/api/projects/${projectId}/query/`, {
@@ -44,7 +46,7 @@ export async function GET(req: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ query: { kind: "HogQLQuery", query: buildQuery(days) } }),
-      next: { revalidate: 300 },
+      ...upstreamCache(fresh, 300),
     });
 
     if (!res.ok) {

@@ -9,6 +9,7 @@ import {
   pickDays,
   round2,
   utcDate,
+  wantsFreshRefresh,
 } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
@@ -19,14 +20,15 @@ export const dynamic = "force-dynamic";
 // the per-range CAC-proxy (spend / transactions) covers the selected range.
 export async function GET(req: NextRequest) {
   const days = pickDays(req.nextUrl.searchParams.get("days"));
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
   // Always fetch at least 28 days of spend so blended CAC has its full window.
   const spendWindow = Math.max(days, 28);
 
   try {
     const [spendByDay, revenueChart, overview] = await Promise.all([
-      fetchWindsorSpend(utcDate(spendWindow - 1), utcDate(0)),
-      fetchRcChart("revenue"),
-      fetchRcOverview(),
+      fetchWindsorSpend(utcDate(spendWindow - 1), utcDate(0), fresh),
+      fetchRcChart("revenue", fresh),
+      fetchRcOverview(fresh),
     ]);
 
     const revenueByDay = new Map(revenueChart.map((r) => [r.date, r]));
@@ -116,6 +118,8 @@ export async function GET(req: NextRequest) {
         proceeds: round2(totals.proceeds),
         transactions: totals.transactions,
         net: round2(totals.proceeds - totals.spend),
+        // Spend per transaction, NOT acquisition CAC: renewals inflate the
+        // denominator. For true acquisition cost see blended CAC below.
         cacProxy: totals.transactions > 0 ? round2(totals.spend / totals.transactions) : null,
       },
       blended: {

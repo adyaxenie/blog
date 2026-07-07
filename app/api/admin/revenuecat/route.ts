@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { wantsFreshRefresh, upstreamCache } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
@@ -16,17 +17,18 @@ export async function GET(req: NextRequest) {
 
   const daysParam = Number(req.nextUrl.searchParams.get("days"));
   const days = ALLOWED_DAYS.has(daysParam) ? daysParam : 30;
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
 
   const headers = { Authorization: `Bearer ${apiKey}` };
   try {
     const [overviewRes, chartRes] = await Promise.all([
       fetch(`${RC_BASE}/projects/${projectId}/metrics/overview`, {
         headers,
-        next: { revalidate: 300 },
+        ...upstreamCache(fresh, 300),
       }),
       fetch(`${RC_BASE}/projects/${projectId}/charts/revenue`, {
         headers,
-        next: { revalidate: 300 },
+        ...upstreamCache(fresh, 300),
       }),
     ]);
 

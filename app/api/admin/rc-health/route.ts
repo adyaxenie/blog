@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConfigError, fetchRcChart, pickDays, round2, type RcChartDay } from "@/lib/adminSources";
+import { ConfigError, fetchRcChart, pickDays, round2, wantsFreshRefresh, type RcChartDay } from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
 // Subscription health from RevenueCat chart endpoints (all probed 200 with
-// data): churn, refund_rate, conversion_to_paying, actives_movement. Any
-// endpoint that fails just comes back null and its panel is skipped.
+// data): refund_rate, conversion_to_paying. Any endpoint that fails just comes
+// back null and its panel is skipped.
 
 function windowed(rows: RcChartDay[], days: number) {
   return rows.slice(-days).map((r) => ({
@@ -18,11 +18,12 @@ function windowed(rows: RcChartDay[], days: number) {
 
 export async function GET(req: NextRequest) {
   const days = pickDays(req.nextUrl.searchParams.get("days"));
+  const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
 
-  const names = ["churn", "refund_rate", "conversion_to_paying", "actives_movement"] as const;
+  const names = ["refund_rate", "conversion_to_paying"] as const;
   let results: PromiseSettledResult<RcChartDay[]>[];
   try {
-    results = await Promise.allSettled(names.map((n) => fetchRcChart(n)));
+    results = await Promise.allSettled(names.map((n) => fetchRcChart(n, fresh)));
   } catch (e) {
     return NextResponse.json({ configured: false, error: String(e) });
   }
@@ -34,24 +35,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ configured: false, error: String(configErr.reason.message) });
   }
 
-  const [churnRes, refundRes, convRes, moveRes] = results;
-
-  // churn measures: 0 actives, 1 churned, 2 churn rate %
-  let churn = null;
-  if (churnRes.status === "fulfilled" && churnRes.value.length) {
-    const rows = windowed(churnRes.value, days);
-    const totalChurned = rows.reduce((s, r) => s + (r.measures[1] ?? 0), 0);
-    churn = {
-      series: rows.map((r) => ({
-        date: r.date,
-        label: r.label,
-        actives: r.measures[0] ?? 0,
-        churned: r.measures[1] ?? 0,
-        rate: round2(r.measures[2] ?? 0),
-      })),
-      totalChurned,
-    };
-  }
+  const [refundRes, convRes] = results;
 
   // refund_rate measures: 0 transactions, 1 refunded, 2 refund rate %
   let refunds = null;
@@ -91,29 +75,12 @@ export async function GET(req: NextRequest) {
     };
   }
 
-  // actives_movement measures: 0 new, 1 resubscribed, 2 churned, 3 net movement
-  let movement = null;
-  if (moveRes.status === "fulfilled" && moveRes.value.length) {
-    const rows = windowed(moveRes.value, days);
-    movement = {
-      series: rows.map((r) => ({
-        date: r.date,
-        label: r.label,
-        newActives: r.measures[0] ?? 0,
-        resubscribed: r.measures[1] ?? 0,
-        churned: r.measures[2] ?? 0,
-        movement: r.measures[3] ?? 0,
-      })),
-      net: rows.reduce((s, r) => s + (r.measures[3] ?? 0), 0),
-    };
-  }
-
-  if (!churn && !refunds && !conversion && !movement) {
+  if (!refunds && !conversion) {
     return NextResponse.json(
       { configured: true, error: "No RevenueCat health charts returned data" },
       { status: 502 }
     );
   }
 
-  return NextResponse.json({ configured: true, days, churn, refunds, conversion, movement });
+  return NextResponse.json({ configured: true, days, refunds, conversion });
 }
