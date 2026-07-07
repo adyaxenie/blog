@@ -107,31 +107,6 @@ export async function fetchRcOverview(fresh = false): Promise<RcOverviewMetric[]
   return data.metrics ?? [];
 }
 
-// Windsor TikTok daily spend, inclusive date range → Map<YYYY-MM-DD, spend>.
-export async function fetchWindsorSpend(
-  dateFrom: string,
-  dateTo: string,
-  fresh = false
-): Promise<Map<string, number>> {
-  const apiKey = process.env.WINDSOR_API_KEY;
-  if (!apiKey || apiKey.startsWith("REPLACE")) {
-    throw new ConfigError("Set WINDSOR_API_KEY (from windsor.ai account settings) in .env.local");
-  }
-  const url =
-    `https://connectors.windsor.ai/tiktok?api_key=${encodeURIComponent(apiKey)}` +
-    `&date_from=${dateFrom}&date_to=${dateTo}&fields=date,spend`;
-  const res = await fetch(url, upstreamCache(fresh, 600));
-  if (!res.ok) throw new Error(`Windsor request failed (${res.status})`);
-  const payload = await res.json();
-  const byDay = new Map<string, number>();
-  for (const r of (payload.data ?? []) as { date: string; spend?: number | string }[]) {
-    const day = String(r.date).slice(0, 10);
-    const n = Number(r.spend);
-    byDay.set(day, (byDay.get(day) ?? 0) + (Number.isFinite(n) ? n : 0));
-  }
-  return byDay;
-}
-
 // Run a HogQL query against the PostHog project; returns raw result rows.
 export async function posthogQuery(query: string, fresh = false): Promise<unknown[][]> {
   const apiKey = process.env.POSTHOG_API_KEY;

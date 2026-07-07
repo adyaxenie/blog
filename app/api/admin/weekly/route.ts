@@ -3,7 +3,6 @@ import {
   ConfigError,
   addDays,
   fetchRcChart,
-  fetchWindsorSpend,
   fmtDateRange,
   mondayOf,
   posthogQuery,
@@ -11,6 +10,7 @@ import {
   utcDate,
   wantsFreshRefresh,
 } from "@/lib/adminSources";
+import { fetchTikTokSpend } from "@/lib/tiktokSpend";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const [spendByDay, revenueChart, phRows] = await Promise.all([
-      fetchWindsorSpend(firstDay, lastDay, fresh),
+      fetchTikTokSpend(firstDay, lastDay, fresh),
       fetchRcChart("revenue", fresh),
       posthogQuery(phQuery, fresh),
     ]);

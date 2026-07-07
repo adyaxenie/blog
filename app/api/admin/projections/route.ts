@@ -3,11 +3,11 @@ import {
   APPLE_PROCEEDS_RATE,
   ConfigError,
   fetchRcChart,
-  fetchWindsorSpend,
   round2,
   utcDate,
   wantsFreshRefresh,
 } from "@/lib/adminSources";
+import { fetchTikTokSpend } from "@/lib/tiktokSpend";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const [spendByDay, revenueChart] = await Promise.all([
-      fetchWindsorSpend(from, today, fresh),
+      fetchTikTokSpend(from, today, fresh),
       fetchRcChart("revenue", fresh),
     ]);
     const revenueByDay = new Map(revenueChart.map((r) => [r.date, r.measures[0] ?? 0]));

@@ -12,10 +12,11 @@ Remote scheduled routines run in Anthropic's sandbox. Outbound `curl` to the das
 2. Edit your routine → **Environment** (e.g. Default cloud env)
 3. **Network access** → **Custom**
 4. Add to **Allowed domains**:
-   - `vercel-test-mu-bay.vercel.app` (dashboard API — **not** dailyglowup.app)
-   - `*.vercel.app` (optional wildcard)
-   - `connectors.windsor.ai` (if pulling Windsor directly)
-   - `us.posthog.com`, `api.revenuecat.com` (optional, if not using dashboard APIs)
+ - `vercel-test-mu-bay.vercel.app` (dashboard API — **not** dailyglowup.app)
+ - `*.vercel.app` (optional wildcard)
+ - `api.supermetrics.com` (TikTok ads data — primary source)
+ - `connectors.windsor.ai` (TikTok ads data — fallback only)
+ - `us.posthog.com`, `api.revenuecat.com` (optional, if not using dashboard APIs)
 
 Also set **environment secrets** on that same routine:
 

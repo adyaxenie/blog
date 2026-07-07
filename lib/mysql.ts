@@ -7,6 +7,14 @@ declare global {
   var _mysqlPool: mysql.Pool | undefined;
 }
 
+const TRANSIENT_DB_ERRORS = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "PROTOCOL_CONNECTION_LOST",
+]);
+
 function poolConfig(): mysql.PoolOptions {
   const creds = dbCredentials();
   if (!creds.host || !creds.user || !creds.database) {
@@ -22,6 +30,9 @@ function poolConfig(): mysql.PoolOptions {
     database: creds.database,
     waitForConnections: true,
     connectionLimit: 5,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0,
+    connectTimeout: 10_000,
   };
 }
 
@@ -57,13 +68,35 @@ export function getPool(): mysql.Pool {
   return global._mysqlPool;
 }
 
+async function resetPool(): Promise<void> {
+  if (global._mysqlPool) {
+    await global._mysqlPool.end().catch(() => {});
+    global._mysqlPool = undefined;
+  }
+  schemaReady = null;
+}
+
+function isTransientDbError(e: unknown): boolean {
+  const code = (e as NodeJS.ErrnoException)?.code;
+  return typeof code === "string" && TRANSIENT_DB_ERRORS.has(code);
+}
+
 export async function query<T extends QueryResult>(
   sql: string,
-  params: (string | number | boolean | null)[] = []
+  params: (string | number | boolean | null)[] = [],
+  retries = 1
 ): Promise<T> {
   // Use query() not execute() — prepared statements reject LIMIT ? on many MySQL builds.
-  const [rows] = await getPool().query(sql, params);
-  return rows as T;
+  try {
+    const [rows] = await getPool().query(sql, params);
+    return rows as T;
+  } catch (e) {
+    if (retries > 0 && isTransientDbError(e)) {
+      await resetPool();
+      return query(sql, params, retries - 1);
+    }
+    throw e;
+  }
 }
 
 export function isMysqlConfigured(): boolean {
@@ -73,10 +106,8 @@ export function isMysqlConfigured(): boolean {
 
 let schemaReady: Promise<void> | null = null;
 
-export async function ensureSchema(): Promise<void> {
-  if (!schemaReady) {
-    schemaReady = (async () => {
-      await query(`
+async function createSchema(): Promise<void> {
+  await query(`
         CREATE TABLE IF NOT EXISTS todos (
           id CHAR(36) PRIMARY KEY,
           text VARCHAR(1000) NOT NULL,
@@ -107,7 +138,14 @@ export async function ensureSchema(): Promise<void> {
           INDEX idx_formats_done_created (done, created_at DESC)
         )
       `);
-    })();
+}
+
+export async function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((e) => {
+      schemaReady = null;
+      throw e;
+    });
   }
   await schemaReady;
 }

@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   ConfigError,
   fetchRcChart,
-  fetchWindsorSpend,
   posthogQuery,
   round2,
   utcDate,
   wantsFreshRefresh,
 } from "@/lib/adminSources";
+import { fetchTikTokSpend } from "@/lib/tiktokSpend";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const [spendByDay, revenueChart, phRows] = await Promise.all([
-      fetchWindsorSpend(utcDate(8), yesterday, fresh),
+      fetchTikTokSpend(utcDate(8), yesterday, fresh),
       fetchRcChart("revenue", fresh),
       posthogQuery(phQuery, fresh),
     ]);

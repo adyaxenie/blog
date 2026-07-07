@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -44,9 +45,14 @@ type Creative = {
   verdict: Verdict;
 };
 
+type Campaign = { name: string; spend: number; type: "test" | "main" };
+
 type CreativesData = {
   configured: boolean;
   error?: string;
+  source?: "supermetrics" | "windsor";
+  campaigns?: Campaign[];
+  filter?: { campaign: string | null };
   creatives?: Creative[];
   daily?: { date: string; label: string; spend: number; installs: number; costPerInstall: number | null }[];
   totals?: {
@@ -80,6 +86,37 @@ function VerdictBadge({ verdict }: { verdict: Verdict }) {
   );
 }
 
+function CampaignFilter({
+  campaigns,
+  selected,
+  onChange,
+}: {
+  campaigns: Campaign[];
+  selected: string | null;
+  onChange: (name: string | null) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+        Campaign
+      </label>
+      <select
+        value={selected ?? ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-200 outline-none focus:border-zinc-600"
+      >
+        <option value="">All campaigns</option>
+        {campaigns.map((c) => (
+          <option key={c.name} value={c.name}>
+            {c.name} · {fmtMoney(Math.round(c.spend))}
+            {c.type === "test" ? " · ABO test" : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
@@ -91,11 +128,40 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
 }
 
 export function TikTokAdsTab({ days }: { days: number }) {
-  const { data, error, loading } = useApi<CreativesData>(`/api/admin/tiktok-creatives?days=${days}`);
+  const [campaign, setCampaign] = useState<string | null>(null);
+  // A campaign selection may not exist in another date range; reset on change.
+  useEffect(() => {
+    setCampaign(null);
+  }, [days]);
+
+  const path =
+    `/api/admin/tiktok-creatives?days=${days}` +
+    (campaign ? `&campaign=${encodeURIComponent(campaign)}` : "");
+  const { data, error, loading } = useApi<CreativesData>(path);
+
+  // Persist the campaign list so the filter stays populated during refetches
+  // (useApi clears data whenever the path — i.e. the filter — changes).
+  const [knownCampaigns, setKnownCampaigns] = useState<Campaign[]>([]);
+  useEffect(() => {
+    if (data?.campaigns) setKnownCampaigns(data.campaigns);
+  }, [data]);
+  useEffect(() => {
+    setKnownCampaigns([]);
+  }, [days]);
+
+  const filterBar = (
+    <CampaignFilter
+      campaigns={knownCampaigns}
+      selected={campaign}
+      onChange={setCampaign}
+    />
+  );
+
   if (error || data?.error) return <Notice message={error || data?.error || ""} />;
   if (loading || !data) {
     return (
       <div className="space-y-4">
+        {filterBar}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="h-24 animate-pulse rounded-xl bg-zinc-800/50" />
@@ -112,11 +178,14 @@ export function TikTokAdsTab({ days }: { days: number }) {
   const daily = data.daily ?? [];
   const cacSeries = daily.filter((d) => d.costPerInstall != null);
 
+  const scope = data.filter?.campaign ?? "All Daily Glow campaigns";
+
   return (
     <div className="space-y-4">
+      {filterBar}
       {t && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <Tile label="Spend" value={fmtMoney(Math.round(t.spend))} sub="Daily Glow campaigns" />
+          <Tile label="Spend" value={fmtMoney(Math.round(t.spend))} sub={scope} />
           <Tile
             label="Cost / install"
             value={t.costPerInstall != null ? fmtMoney2(t.costPerInstall) : "—"}
@@ -141,7 +210,10 @@ export function TikTokAdsTab({ days }: { days: number }) {
         </div>
       )}
 
-      <Panel title="Creative performance" meta={`last ${creatives.length} creatives with spend · newest first · UTC`}>
+      <Panel
+        title="Creative performance"
+        meta={`${scope} · ${creatives.length} creatives with spend · newest first · UTC`}
+      >
         {creatives.length === 0 ? (
           <p className="text-xs text-zinc-500">No creative spend in this range.</p>
         ) : (

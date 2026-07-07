@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConfigError, fetchRcChart, pickDays, posthogQuery, round2, upstreamCache, utcDate, wantsFreshRefresh } from "@/lib/adminSources";
+import { ConfigError, fetchRcChart, pickDays, posthogQuery, round2, utcDate, wantsFreshRefresh } from "@/lib/adminSources";
+import { fetchTikTokCreativeRows, TikTokRow } from "@/lib/tiktokSpend";
 
 export const dynamic = "force-dynamic";
 
@@ -10,12 +11,12 @@ export const dynamic = "force-dynamic";
 // separately as cost-per-install. ATT still makes TikTok undercount paid
 // conversions, so the verdict rules lean on watch-time/hook-rate signals,
 // which ATT can't hide.
-
-// Single Windsor call: `campaign_name` (not the alias `campaign`) is required
-// to get the full "Real Title _Ad name<ts>" format from TikTok Smart Creative.
-const FIELDS =
-  "date,campaign_name,ad_id,ad_name,spend,impressions,clicks,conversions," +
-  "video_play_actions,video_watched_2s,video_watched_6s,average_video_play";
+//
+// Data comes from Supermetrics (Windsor fallback) at ad_id + ad_name
+// granularity. `campaign_name` carries the full "Real Title _Ad name<ts>"
+// format from TikTok Smart Creative. Note: average watch time
+// (`average_video_play`) is only available via the Windsor fallback; under
+// Supermetrics `avgWatch` is null and the verdict leans on hook/hold rates.
 
 const CAMPAIGN_FILTER = /dailyglowup/i;
 const TESTING_CAMPAIGN = /testing/i;
@@ -42,22 +43,6 @@ const SCALE_WATCH = 2.5;
 const KILL_WATCH = 2.0;
 const MIN_SPEND_FOR_VERDICT = 20;
 const NO_CONV_KILL_SPEND = 2 * TARGET_CPA;
-
-type WindsorRow = {
-  date?: string;
-  campaign?: string;       // alias Windsor also accepts
-  campaign_name?: string;  // canonical field name
-  ad_id?: string | number;
-  ad_name?: string;
-  spend?: number | string;
-  impressions?: number | string;
-  clicks?: number | string;
-  conversions?: number | string;
-  video_play_actions?: number | string;
-  video_watched_2s?: number | string;
-  video_watched_6s?: number | string;
-  average_video_play?: number | string;
-};
 
 const num = (v: number | string | undefined) => {
   const n = Number(v);
@@ -112,15 +97,9 @@ type Totals = {
 };
 
 export async function GET(req: NextRequest) {
-  const apiKey = process.env.WINDSOR_API_KEY;
-  if (!apiKey || apiKey.startsWith("REPLACE")) {
-    return NextResponse.json({
-      configured: false,
-      error: "Set WINDSOR_API_KEY (from windsor.ai account settings) in .env.local",
-    });
-  }
   const days = pickDays(req.nextUrl.searchParams.get("days"));
   const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
+  const campaignParam = req.nextUrl.searchParams.get("campaign");
 
   const phQuery = `
     SELECT
@@ -134,28 +113,34 @@ export async function GET(req: NextRequest) {
   `;
 
   try {
-    const url =
-      `https://connectors.windsor.ai/tiktok?api_key=${encodeURIComponent(apiKey)}` +
-      `&date_from=${utcDate(days - 1)}&date_to=${utcDate(0)}&fields=${FIELDS}`;
-    const [windsorRes, phRows, payingChart] = await Promise.all([
-      fetch(url, upstreamCache(fresh, 600)),
+    const [ttFetch, phRows, payingChart] = await Promise.all([
+      fetchTikTokCreativeRows(utcDate(days - 1), utcDate(0), fresh),
       posthogQuery(phQuery, fresh),
       fetchRcChart("conversion_to_paying", fresh).catch(() => null),
     ]);
 
-    if (!windsorRes.ok) {
-      const text = await windsorRes.text();
-      return NextResponse.json(
-        { configured: true, error: `Windsor request failed (${windsorRes.status}): ${text.slice(0, 200)}` },
-        { status: 502 }
-      );
-    }
+    const cn = (r: TikTokRow) => String(r.campaign_name ?? "");
+    // Daily Glow campaigns only (the ad account also runs other products).
+    const dgRows = ttFetch.rows.filter((r) => CAMPAIGN_FILTER.test(cn(r)));
 
-    const cn = (r: WindsorRow) => String(r.campaign_name ?? r.campaign ?? "");
-    const payload = await windsorRes.json();
-    const rows = ((payload.data ?? []) as WindsorRow[]).filter((r) =>
-      CAMPAIGN_FILTER.test(cn(r))
-    );
+    // Campaign summary across all Daily Glow campaigns (drives the UI filter
+    // dropdown) — built before applying the per-campaign filter below.
+    const campMap = new Map<string, { name: string; spend: number; type: "test" | "main" }>();
+    for (const r of dgRows) {
+      const name = cn(r) || "(unknown campaign)";
+      const e =
+        campMap.get(name) ??
+        { name, spend: 0, type: TESTING_CAMPAIGN.test(name) ? ("test" as const) : ("main" as const) };
+      e.spend += num(r.spend);
+      campMap.set(name, e);
+    }
+    const campaigns = Array.from(campMap.values())
+      .map((c) => ({ ...c, spend: round2(c.spend) }))
+      .sort((a, b) => b.spend - a.spend);
+
+    // Optional single-campaign filter; ignored if the name isn't recognized.
+    const activeCampaign = campaignParam && campMap.has(campaignParam) ? campaignParam : null;
+    const rows = activeCampaign ? dgRows.filter((r) => cn(r) === activeCampaign) : dgRows;
 
     const installsByDay = new Map<string, number>();
     for (const row of phRows as [string, number][]) {
@@ -196,6 +181,7 @@ export async function GET(req: NextRequest) {
       watched2s: number;
       watched6s: number;
       watchSeconds: number; // Σ avg_watch × plays
+      hasWatch: boolean; // avg_watch provided by the source (Windsor only)
     };
     const byCreative = new Map<string, Agg>();
 
@@ -232,6 +218,7 @@ export async function GET(req: NextRequest) {
         watched2s: 0,
         watched6s: 0,
         watchSeconds: 0,
+        hasWatch: false,
       };
       if (num(r.spend) > 0 && day > a.lastActive) a.lastActive = day;
       a.spend += num(r.spend);
@@ -241,7 +228,13 @@ export async function GET(req: NextRequest) {
       a.plays += num(r.video_play_actions);
       a.watched2s += num(r.video_watched_2s);
       a.watched6s += num(r.video_watched_6s);
-      a.watchSeconds += num(r.average_video_play) * num(r.video_play_actions);
+      // average_video_play is only present via the Windsor fallback; when the
+      // source omits it (Supermetrics), avgWatch stays null instead of 0 so the
+      // watch-time kill rule doesn't misfire.
+      if (r.average_video_play != null) {
+        a.hasWatch = true;
+        a.watchSeconds += num(r.average_video_play) * num(r.video_play_actions);
+      }
       byCreative.set(key, a);
     }
 
@@ -264,7 +257,7 @@ export async function GET(req: NextRequest) {
           ctr: a.impressions > 0 ? a.clicks / a.impressions : null,
           hookRate: a.plays > 0 ? a.watched2s / a.plays : null,
           holdRate: a.plays > 0 ? a.watched6s / a.plays : null,
-          avgWatch: a.plays > 0 ? round2(a.watchSeconds / a.plays) : null,
+          avgWatch: a.hasWatch && a.plays > 0 ? round2(a.watchSeconds / a.plays) : null,
         };
         return {
           ...base,
@@ -312,7 +305,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       configured: true,
+      source: ttFetch.source,
       days,
+      campaigns,
+      filter: { campaign: activeCampaign },
       creatives,
       daily,
       totals,

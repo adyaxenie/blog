@@ -4,18 +4,18 @@ import {
   ConfigError,
   fetchRcChart,
   fetchRcOverview,
-  fetchWindsorSpend,
   mondayOf,
   pickDays,
   round2,
   utcDate,
   wantsFreshRefresh,
 } from "@/lib/adminSources";
+import { fetchTikTokSpend } from "@/lib/tiktokSpend";
 
 export const dynamic = "force-dynamic";
 
-// Blended CAC + spend-vs-revenue economics. Windsor TikTok spend merged with
-// RevenueCat revenue/transactions per UTC day. Blended CAC uses a matched
+// Blended CAC + spend-vs-revenue economics. TikTok spend (Supermetrics, Windsor
+// fallback) merged with RevenueCat revenue/transactions per UTC day. Blended CAC uses a matched
 // 28-day window because RC's new_customers overview metric is fixed at 28 days;
 // the per-range CAC-proxy (spend / transactions) covers the selected range.
 export async function GET(req: NextRequest) {
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const [spendByDay, revenueChart, overview] = await Promise.all([
-      fetchWindsorSpend(utcDate(spendWindow - 1), utcDate(0), fresh),
+      fetchTikTokSpend(utcDate(spendWindow - 1), utcDate(0), fresh),
       fetchRcChart("revenue", fresh),
       fetchRcOverview(fresh),
     ]);
