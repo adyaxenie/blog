@@ -1,22 +1,15 @@
-// TikTok Ads fetch layer. Supermetrics is the primary source; Windsor.ai is a
-// drop-in fallback used when Supermetrics is unconfigured or errors. Both are
-// normalized to a single Windsor-compatible row shape so the admin routes and
-// their aggregation/verdict logic stay source-agnostic.
+// TikTok Ads fetch layer via Supermetrics.
 //
 // Field notes:
-//   - Supermetrics TikTok (`ds_id: TIK`) spend field is `cost`; everything else
-//     shares Windsor's field ids (campaign_name, ad_id, ad_name, impressions,
-//     clicks, conversions, video_play_actions, video_watched_2s/6s).
-//   - Supermetrics does NOT expose an average-watch-time metric, so
-//     `average_video_play` is only populated by the Windsor fallback. Under
-//     Supermetrics it stays undefined and downstream `avgWatch` is null (hook/
-//     hold rates still come through).
+//   - Supermetrics TikTok (`ds_id: TIK`) spend field is `cost`; other fields
+//     use the connector ids below (campaign_name, ad_id, ad_name, etc.).
+//   - Supermetrics does NOT expose average watch time, so downstream
+//     `avgWatch` stays null (hook/hold rates still come through).
 
 import { ConfigError, upstreamCache } from "./adminSources";
 
-export type TikTokSource = "supermetrics" | "windsor";
+export type TikTokSource = "supermetrics";
 
-// Normalized row shape shared by both providers.
 export type TikTokRow = {
   date?: string;
   campaign_name?: string;
@@ -29,7 +22,6 @@ export type TikTokRow = {
   video_play_actions?: number;
   video_watched_2s?: number;
   video_watched_6s?: number;
-  average_video_play?: number;
 };
 
 export type TikTokField = keyof TikTokRow;
@@ -44,7 +36,6 @@ const NUMERIC_FIELDS: ReadonlySet<TikTokField> = new Set<TikTokField>([
   "video_play_actions",
   "video_watched_2s",
   "video_watched_6s",
-  "average_video_play",
 ]);
 
 // Field sets per consumer.
@@ -68,7 +59,6 @@ export const CREATIVE_FIELDS: TikTokField[] = [
   "video_play_actions",
   "video_watched_2s",
   "video_watched_6s",
-  "average_video_play",
 ];
 const SPEND_FIELDS: TikTokField[] = ["date", "spend"];
 
@@ -79,8 +69,6 @@ const toNum = (v: unknown): number => {
 
 const isConfigured = (key: string | undefined): key is string =>
   !!key && !key.startsWith("REPLACE");
-
-// ---------- Supermetrics (primary) ----------
 
 const SM_ENDPOINT = "https://api.supermetrics.com/v2/query/data/json";
 const SM_DS_ID = "TIK";
@@ -99,7 +87,6 @@ const SM_FIELD_ID: Partial<Record<TikTokField, string>> = {
   video_play_actions: "video_play_actions",
   video_watched_2s: "video_watched_2s",
   video_watched_6s: "video_watched_6s",
-  // average_video_play: not offered by the Supermetrics TikTok connector.
 };
 
 async function fetchSupermetrics(
@@ -159,68 +146,14 @@ async function fetchSupermetrics(
   });
 }
 
-// ---------- Windsor (fallback) ----------
-
-const WINDSOR_ENDPOINT = "https://connectors.windsor.ai/tiktok";
-
-async function fetchWindsor(
-  fields: TikTokField[],
-  dateFrom: string,
-  dateTo: string,
-  fresh: boolean
-): Promise<TikTokRow[]> {
-  const apiKey = process.env.WINDSOR_API_KEY;
-  if (!isConfigured(apiKey)) {
-    throw new ConfigError("Set WINDSOR_API_KEY (from windsor.ai account settings) in .env.local");
-  }
-  // Windsor field ids match our logical ids one-to-one.
-  const url =
-    `${WINDSOR_ENDPOINT}?api_key=${encodeURIComponent(apiKey)}` +
-    `&date_from=${dateFrom}&date_to=${dateTo}&fields=${fields.join(",")}`;
-  const res = await fetch(url, upstreamCache(fresh, 600));
-  if (!res.ok) throw new Error(`Windsor request failed (${res.status})`);
-  const payload = await res.json();
-  const rows = (payload?.data ?? []) as Record<string, unknown>[];
-  return rows.map((r) => {
-    const row: Record<string, unknown> = {};
-    for (const f of fields) {
-      const raw = r[f];
-      row[f] = NUMERIC_FIELDS.has(f) ? toNum(raw) : raw == null ? undefined : String(raw);
-    }
-    return row as TikTokRow;
-  });
-}
-
-// ---------- Orchestration ----------
-
 async function fetchTikTok(
   fields: TikTokField[],
   dateFrom: string,
   dateTo: string,
   fresh: boolean
 ): Promise<TikTokFetch> {
-  const smConfigured = isConfigured(process.env.SUPERMETRICS_API_KEY);
-  const windsorConfigured = isConfigured(process.env.WINDSOR_API_KEY);
-
-  if (smConfigured) {
-    try {
-      const rows = await fetchSupermetrics(fields, dateFrom, dateTo, fresh);
-      return { source: "supermetrics", rows };
-    } catch (e) {
-      // Only fall back when Windsor can actually serve the request.
-      if (!windsorConfigured) throw e;
-      console.warn(`Supermetrics TikTok fetch failed, falling back to Windsor: ${String(e)}`);
-    }
-  }
-
-  if (!smConfigured && !windsorConfigured) {
-    throw new ConfigError(
-      "Set SUPERMETRICS_API_KEY (primary) or WINDSOR_API_KEY (fallback) in .env.local"
-    );
-  }
-
-  const rows = await fetchWindsor(fields, dateFrom, dateTo, fresh);
-  return { source: "windsor", rows };
+  const rows = await fetchSupermetrics(fields, dateFrom, dateTo, fresh);
+  return { source: "supermetrics", rows };
 }
 
 // Raw creative-level rows (ad_id + ad_name granularity) for /tiktok-creatives.

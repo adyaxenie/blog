@@ -50,7 +50,7 @@ function profitClass(v: number) {
 }
 
 export function ProjectionsTab() {
-  const { data, error, loading } = useApi<ProjectionsData>("/api/admin/projections");
+  const { data, error, loading, retry } = useApi<ProjectionsData>("/api/admin/projections");
   const [roasBasis, setRoasBasis] = useState<"7d" | "30d">("30d");
   const [spendOverride, setSpendOverride] = useState<string>("");
 
@@ -78,8 +78,20 @@ export function ProjectionsTab() {
     });
   }, [dailySpend, roas, appleRate]);
 
-  if (error || data?.error) return <Notice message={error || data?.error || ""} />;
-  if (loading || !data) {
+  if (error || data?.error) {
+    return (
+      <div className="space-y-2">
+        <Notice message={error || data?.error || ""} />
+        <button
+          type="button"
+          onClick={retry}
+          className="text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }  if (loading || !data) {
     return (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

@@ -133,3 +133,20 @@ export async function posthogQuery(query: string, fresh = false): Promise<unknow
 }
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Retry transient upstream failures; ConfigError is not retried. */
+export async function withUpstreamRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (e instanceof ConfigError) throw e;
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+      }
+    }
+  }
+  throw last;
+}

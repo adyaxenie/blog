@@ -93,12 +93,35 @@ async function loadApi<T>(path: string, fresh = false): Promise<T> {
   return json as T;
 }
 
+async function loadApiWithRetry<T>(path: string, fresh = false, attempts = 3): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await loadApi<T>(path, fresh);
+    } catch (e) {
+      last = e;
+      // Config / not-configured errors won't recover on retry.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/not set|REPLACE|configured/i.test(msg)) throw e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  throw last;
+}
+
 export function useApi<T>(path: string) {
   const { refreshTick, refresh } = useMetricsRefresh();
   const cached = apiCache.get(path) as T | undefined;
   const [data, setData] = useState<T | null>(cached ?? null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(cached === undefined);
+  const [retryTick, setRetryTick] = useState(0);
+
+  const retry = useCallback(() => {
+    apiCache.delete(path);
+    inflight.delete(path);
+    setRetryTick((t) => t + 1);
+  }, [path]);
 
   useEffect(() => {
     const hit = apiCache.get(path) as T | undefined;
@@ -115,7 +138,7 @@ export function useApi<T>(path: string) {
     const fresh = refreshPending;
     let promise = inflight.get(path) as Promise<T> | undefined;
     if (!promise) {
-      promise = loadApi<T>(path, fresh);
+      promise = loadApiWithRetry<T>(path, fresh);
       inflight.set(path, promise);
       // Cache successful results; leave errors uncached so they retry on remount.
       promise
@@ -140,9 +163,19 @@ export function useApi<T>(path: string) {
     return () => {
       cancelled = true;
     };
-  }, [path, refreshTick]);
+  }, [path, refreshTick, retryTick]);
 
-  return { data, error, loading, refresh };
+  return { data, error, loading, refresh, retry };
+}
+
+/**
+ * Read an already-fetched API payload from the shared session cache without
+ * triggering a network request. Returns undefined on a cache miss (e.g. the
+ * corresponding tab/widget hasn't been opened yet). Keyed identically to
+ * `useApi`, so callers must pass the exact same path (including `?days=N`).
+ */
+export function peekApiCache<T = unknown>(path: string): T | undefined {
+  return apiCache.get(path) as T | undefined;
 }
 
 export function Panel({
@@ -387,7 +420,7 @@ export function PostHogWidget({ days }: { days: number }) {
   );
 }
 
-// ---------- TikTok Ads (Windsor) ----------
+// ---------- TikTok Ads (Supermetrics) ----------
 
 type TtData = {
   configured: boolean;
@@ -538,10 +571,17 @@ const ECO_LINES = [
   },
   {
     key: "proceeds" as const,
+    label: "Proceeds",
+    dot: "bg-violet-400",
+    stroke: "#a78bfa",
+    name: "Proceeds (after Apple 15%)",
+  },
+  {
+    key: "profit" as const,
     label: "Profit",
     dot: "bg-sky-400",
     stroke: "#38bdf8",
-    name: "Profit (after Apple 15%)",
+    name: "Profit (after Apple 15% − spend)",
   },
 ];
 
@@ -551,7 +591,11 @@ const DEFAULT_ECO_LINES: Record<EcoLineKey, boolean> = {
   spend: true,
   revenue: true,
   proceeds: false,
+  profit: false,
 };
+
+/** Hover tooltip row order (independent of toggle / Line render order). */
+const ECO_TOOLTIP_ORDER: EcoLineKey[] = ["revenue", "proceeds", "spend", "profit"];
 
 function EcoLineToggles({
   lines,
@@ -596,6 +640,7 @@ type EcoData = {
     spend: number;
     revenue: number;
     proceeds: number;
+    profit: number;
     transactions: number;
   }[];
   totals?: {
@@ -615,7 +660,7 @@ export function EconomicsOverlay({ days }: { days: number }) {
   const series = data?.series ?? [];
   const t = data?.totals;
   const meta = t
-    ? `net ${t.net < 0 ? "-" : ""}${fmtMoney(Math.abs(Math.round(t.net)))} after Apple 15%${
+    ? `net ${t.net < 0 ? "-" : ""}${fmtMoney(Math.abs(Math.round(t.net)))} after Apple 15% − spend${
         data?.bucket === "week" ? " · weekly buckets" : ""
       } · UTC`
     : "UTC";
@@ -629,7 +674,8 @@ export function EconomicsOverlay({ days }: { days: number }) {
   const singleDayColor: Record<EcoLineKey, string> = {
     spend: "text-rose-400",
     revenue: "text-emerald-400",
-    proceeds: "text-sky-400",
+    proceeds: "text-violet-400",
+    profit: "text-sky-400",
   };
 
   return (
@@ -715,6 +761,9 @@ export function EconomicsOverlay({ days }: { days: number }) {
                       <Tooltip
                         contentStyle={tooltipStyle}
                         formatter={(v, name) => [fmtMoney(Math.round(Number(v))), String(name)]}
+                        itemSorter={(item) =>
+                          ECO_TOOLTIP_ORDER.indexOf(item.dataKey as EcoLineKey)
+                        }
                       />
                       {ECO_LINES.map(
                         (line) =>
@@ -740,11 +789,13 @@ export function EconomicsOverlay({ days }: { days: number }) {
                 )}
               </div>
               <p className="mt-2 text-[10px] text-zinc-600">
-                {lines.spend && lines.proceeds
-                  ? "breakeven where profit crosses spend"
-                  : lines.spend && lines.revenue
-                    ? "breakeven where revenue crosses spend"
-                    : "toggle lines to compare"}
+                {lines.profit
+                  ? "breakeven where profit crosses zero"
+                  : lines.spend && lines.proceeds
+                    ? "breakeven where proceeds cross spend"
+                    : lines.spend && lines.revenue
+                      ? "breakeven where revenue crosses spend"
+                      : "toggle lines to compare"}
               </p>
             </>
           )}

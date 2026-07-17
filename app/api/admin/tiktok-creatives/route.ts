@@ -12,27 +12,26 @@ export const dynamic = "force-dynamic";
 // conversions, so the verdict rules lean on watch-time/hook-rate signals,
 // which ATT can't hide.
 //
-// Data comes from Supermetrics (Windsor fallback) at ad_id + ad_name
-// granularity. `campaign_name` carries the full "Real Title _Ad name<ts>"
-// format from TikTok Smart Creative. Note: average watch time
-// (`average_video_play`) is only available via the Windsor fallback; under
-// Supermetrics `avgWatch` is null and the verdict leans on hook/hold rates.
+// Data comes from Supermetrics at ad_id + ad_name granularity.
+// `campaign_name` carries the full "Real Title _Ad name<ts>" format from
+// TikTok Smart Creative. Supermetrics does not expose average watch time, so
+// `avgWatch` stays null and the verdict leans on hook/hold rates.
 
 const CAMPAIGN_FILTER = /dailyglowup/i;
 const TESTING_CAMPAIGN = /testing/i;
 // The account runs ads that bundle several videos under one ad_id (Smart
-// Creative). Windsor's rows are inconsistent about it: ad_name may be a video
-// title, a title with an "_Ad name2026-06-13 11:43:41" suffix, or just the
-// bare "Ad name<created ts>" per-ad fallback — and the same window can come
-// back split per video on one call and rolled up per ad on the next. Totals
-// are correct either way; the per-video split is best-effort. We key rows by
-// ad_id + resolved title, merging title-less rows into an ad's title only
-// when the ad has exactly one known title.
+// Creative). ad_name may be a video title, a title with an
+// "_Ad name2026-06-13 11:43:41" suffix, or just the bare "Ad name<created ts>"
+// per-ad fallback — and the same window can come back split per video on one
+// call and rolled up per ad on the next. Totals are correct either way; the
+// per-video split is best-effort. We key rows by ad_id + resolved title,
+// merging title-less rows into an ad's title only when the ad has exactly one
+// known title.
 const AD_NAME_SUFFIX = / ?_?Ad name\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const AD_NAME_FALLBACK = /^Ad name(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}$/;
 
 // Titles each ad_id has been seen with. Module-scoped so labels survive
-// responses where Windsor's title enrichment drops out (warm instances only).
+// responses where title enrichment drops out (warm instances only).
 const titlesSeen = new Map<string, Set<string>>();
 
 // Verdict thresholds — from the working playbook: 2.5s+ avg watch time is the
@@ -167,7 +166,8 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Aggregate per ad_id + resolved title. Watch time is play-weighted.
+    // Aggregate per ad_id + resolved title. avgWatch stays null (Supermetrics
+    // has no average-watch metric); verdict uses hook/hold rates instead.
     type Agg = {
       name: string;
       campaign: string;
@@ -180,8 +180,6 @@ export async function GET(req: NextRequest) {
       plays: number;
       watched2s: number;
       watched6s: number;
-      watchSeconds: number; // Σ avg_watch × plays
-      hasWatch: boolean; // avg_watch provided by the source (Windsor only)
     };
     const byCreative = new Map<string, Agg>();
 
@@ -217,8 +215,6 @@ export async function GET(req: NextRequest) {
         plays: 0,
         watched2s: 0,
         watched6s: 0,
-        watchSeconds: 0,
-        hasWatch: false,
       };
       if (num(r.spend) > 0 && day > a.lastActive) a.lastActive = day;
       a.spend += num(r.spend);
@@ -228,13 +224,6 @@ export async function GET(req: NextRequest) {
       a.plays += num(r.video_play_actions);
       a.watched2s += num(r.video_watched_2s);
       a.watched6s += num(r.video_watched_6s);
-      // average_video_play is only present via the Windsor fallback; when the
-      // source omits it (Supermetrics), avgWatch stays null instead of 0 so the
-      // watch-time kill rule doesn't misfire.
-      if (r.average_video_play != null) {
-        a.hasWatch = true;
-        a.watchSeconds += num(r.average_video_play) * num(r.video_play_actions);
-      }
       byCreative.set(key, a);
     }
 
@@ -257,7 +246,7 @@ export async function GET(req: NextRequest) {
           ctr: a.impressions > 0 ? a.clicks / a.impressions : null,
           hookRate: a.plays > 0 ? a.watched2s / a.plays : null,
           holdRate: a.plays > 0 ? a.watched6s / a.plays : null,
-          avgWatch: a.hasWatch && a.plays > 0 ? round2(a.watchSeconds / a.plays) : null,
+          avgWatch: null as number | null,
         };
         return {
           ...base,

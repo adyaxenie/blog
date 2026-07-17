@@ -6,6 +6,7 @@ import {
   round2,
   utcDate,
   wantsFreshRefresh,
+  withUpstreamRetry,
 } from "@/lib/adminSources";
 import { fetchTikTokSpend } from "@/lib/tiktokSpend";
 
@@ -26,9 +27,11 @@ export async function GET(req: NextRequest) {
   const today = utcDate(0);
 
   try {
+    // Retry each upstream independently — projections is a long Supermetrics
+    // window and often loses under the overview load stampede.
     const [spendByDay, revenueChart] = await Promise.all([
-      fetchTikTokSpend(from, today, fresh),
-      fetchRcChart("revenue", fresh),
+      withUpstreamRetry(() => fetchTikTokSpend(from, today, fresh)),
+      withUpstreamRetry(() => fetchRcChart("revenue", fresh)),
     ]);
     const revenueByDay = new Map(revenueChart.map((r) => [r.date, r.measures[0] ?? 0]));
 

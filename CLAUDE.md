@@ -14,8 +14,7 @@ Remote scheduled routines run in Anthropic's sandbox. Outbound `curl` to the das
 4. Add to **Allowed domains**:
  - `vercel-test-mu-bay.vercel.app` (dashboard API — **not** dailyglowup.app)
  - `*.vercel.app` (optional wildcard)
- - `api.supermetrics.com` (TikTok ads data — primary source)
- - `connectors.windsor.ai` (TikTok ads data — fallback only)
+ - `api.supermetrics.com` (TikTok ads data)
  - `us.posthog.com`, `api.revenuecat.com` (optional, if not using dashboard APIs)
 
 Also set **environment secrets** on that same routine:
@@ -112,8 +111,10 @@ Write the payload to `claude-report/pending-push-YYYY-MM-DD.json` and report the
 
 ## Analysis rules (TikTok)
 
-- **Kill**: watch time &lt; 2.5s, 0 conversions after meaningful spend, or clearly dead ABO test
-- **Scale**: paid CAC well below account average with volume
+**Attribution context (July 2026):** MMP real-time reporting is live — TikTok now reports *estimated total* conversions, not SKAN's guaranteed ≤20% subset. Reported CPA is therefore ~4-5x lower than the SKAN era and near-accurate. Old SKAN-era benchmarks (winner ~$32 CPA, healthy = sub-$40) are obsolete — never compare against them. Current MMP-era norms: account avg CPA ~$10-11, winner range $7-10, standout &lt;$6. Still crosscheck against PostHog installs (blended CAC) for Spark-ad organic spillover.
+
+- **Kill**: watch time &lt; 2.5s; 0 conversions after ~$15-20 spend (real-time reporting = judge faster, no SKAN delay); CPA &gt; $20 (≈2x account avg) with 3+ conversions; or clearly dead ABO test
+- **Scale**: CPA &lt; $7 with 2+ conversions and volume (well below the ~$10-11 account average)
 - **Test**: new creative / hook variations when pipeline is empty or winner fatigues
 - **Concentration**: flag when one creative takes &gt;70% of daily spend
-- **CPA fatigue**: compare 7d CPA vs historical norm; flag 0-conv days on main spender
+- **CPA fatigue**: compare 7d CPA vs the ~$10-11 MMP-era norm; flag a creative drifting above $15 or 0-conv days on the main spender

@@ -50,7 +50,7 @@ type Campaign = { name: string; spend: number; type: "test" | "main" };
 type CreativesData = {
   configured: boolean;
   error?: string;
-  source?: "supermetrics" | "windsor";
+  source?: "supermetrics";
   campaigns?: Campaign[];
   filter?: { campaign: string | null };
   creatives?: Creative[];

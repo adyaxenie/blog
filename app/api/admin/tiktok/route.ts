@@ -5,7 +5,7 @@ import { fetchTikTokOverviewRows, TikTokRow } from "@/lib/tiktokSpend";
 export const dynamic = "force-dynamic";
 
 // TikTok Ads account overview: daily spend/impressions/clicks/conversions
-// across all campaigns. Sourced via Supermetrics (Windsor fallback).
+// across all campaigns. Sourced via Supermetrics.
 
 const num = (v: number | string | undefined) => {
   const n = Number(v);

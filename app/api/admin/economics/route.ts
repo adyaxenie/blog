@@ -14,8 +14,8 @@ import { fetchTikTokSpend } from "@/lib/tiktokSpend";
 
 export const dynamic = "force-dynamic";
 
-// Blended CAC + spend-vs-revenue economics. TikTok spend (Supermetrics, Windsor
-// fallback) merged with RevenueCat revenue/transactions per UTC day. Blended CAC uses a matched
+// Blended CAC + spend-vs-revenue economics. TikTok spend (Supermetrics) merged
+// with RevenueCat revenue/transactions per UTC day. Blended CAC uses a matched
 // 28-day window because RC's new_customers overview metric is fixed at 28 days;
 // the per-range CAC-proxy (spend / transactions) covers the selected range.
 export async function GET(req: NextRequest) {
@@ -34,22 +34,27 @@ export async function GET(req: NextRequest) {
     const revenueByDay = new Map(revenueChart.map((r) => [r.date, r]));
 
     // Daily series across the selected range (missing days → 0).
+    // proceeds = revenue after Apple 15%; profit = proceeds − ad spend.
     const daily: {
       date: string;
       spend: number;
       revenue: number;
       proceeds: number;
+      profit: number;
       transactions: number;
     }[] = [];
     for (let i = days - 1; i >= 0; i--) {
       const date = utcDate(i);
       const rc = revenueByDay.get(date);
       const revenue = round2(rc?.measures[0] ?? 0);
+      const spend = round2(spendByDay.get(date) ?? 0);
+      const proceeds = round2(revenue * APPLE_PROCEEDS_RATE);
       daily.push({
         date,
-        spend: round2(spendByDay.get(date) ?? 0),
+        spend,
         revenue,
-        proceeds: round2(revenue * APPLE_PROCEEDS_RATE),
+        proceeds,
+        profit: round2(proceeds - spend),
         transactions: rc?.measures[1] ?? 0,
       });
     }
@@ -62,6 +67,7 @@ export async function GET(req: NextRequest) {
       spend: number;
       revenue: number;
       proceeds: number;
+      profit: number;
       transactions: number;
     }[];
     if (bucket === "week") {
@@ -86,6 +92,7 @@ export async function GET(req: NextRequest) {
           spend: round2(m.spend),
           revenue: round2(m.revenue),
           proceeds: round2(m.proceeds),
+          profit: round2(m.proceeds - m.spend),
           transactions: m.transactions,
         }));
     } else {

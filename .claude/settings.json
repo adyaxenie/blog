@@ -5,7 +5,6 @@
         "vercel-test-mu-bay.vercel.app",
         "*.vercel.app",
         "api.supermetrics.com",
-        "connectors.windsor.ai",
         "api.revenuecat.com",
         "us.posthog.com",
         "*.posthog.com"
