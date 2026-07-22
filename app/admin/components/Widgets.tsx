@@ -93,7 +93,7 @@ async function loadApi<T>(path: string, fresh = false): Promise<T> {
   return json as T;
 }
 
-async function loadApiWithRetry<T>(path: string, fresh = false, attempts = 3): Promise<T> {
+async function loadApiWithRetry<T>(path: string, fresh = false, attempts = 1): Promise<T> {
   let last: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -109,8 +109,9 @@ async function loadApiWithRetry<T>(path: string, fresh = false, attempts = 3): P
   throw last;
 }
 
-export function useApi<T>(path: string) {
+export function useApi<T>(path: string, opts?: { retries?: number }) {
   const { refreshTick, refresh } = useMetricsRefresh();
+  const retries = opts?.retries ?? 1;
   const cached = apiCache.get(path) as T | undefined;
   const [data, setData] = useState<T | null>(cached ?? null);
   const [error, setError] = useState("");
@@ -138,7 +139,7 @@ export function useApi<T>(path: string) {
     const fresh = refreshPending;
     let promise = inflight.get(path) as Promise<T> | undefined;
     if (!promise) {
-      promise = loadApiWithRetry<T>(path, fresh);
+      promise = loadApiWithRetry<T>(path, fresh, retries);
       inflight.set(path, promise);
       // Cache successful results; leave errors uncached so they retry on remount.
       promise
@@ -163,7 +164,7 @@ export function useApi<T>(path: string) {
     return () => {
       cancelled = true;
     };
-  }, [path, refreshTick, retryTick]);
+  }, [path, refreshTick, retryTick, retries]);
 
   return { data, error, loading, refresh, retry };
 }
@@ -630,6 +631,38 @@ function EcoLineToggles({
   );
 }
 
+function EcoViewToggle({
+  view,
+  onChange,
+}: {
+  view: "chart" | "numbers";
+  onChange: (view: "chart" | "numbers") => void;
+}) {
+  return (
+    <div className="flex rounded-md border border-zinc-800 bg-zinc-900/60 p-0.5">
+      {(
+        [
+          { id: "chart", label: "Chart" },
+          { id: "numbers", label: "Numbers" },
+        ] as const
+      ).map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          onClick={() => onChange(opt.id)}
+          className={`rounded px-2 py-0.5 text-[10px] transition-colors ${
+            view === opt.id
+              ? "bg-zinc-700 font-medium text-zinc-100"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 type EcoData = {
   configured: boolean;
   error?: string;
@@ -657,6 +690,7 @@ type EcoData = {
 export function EconomicsOverlay({ days }: { days: number }) {
   const { data, error, loading } = useApi<EcoData>(`/api/admin/economics?days=${days}`);
   const [lines, setLines] = useState(DEFAULT_ECO_LINES);
+  const [view, setView] = useState<"chart" | "numbers">("chart");
   const series = data?.series ?? [];
   const t = data?.totals;
   const meta = t
@@ -677,6 +711,14 @@ export function EconomicsOverlay({ days }: { days: number }) {
     proceeds: "text-violet-400",
     profit: "text-sky-400",
   };
+  // Range totals for the numbers view (profit = net after Apple 15% − spend).
+  const rangeTotals: Record<EcoLineKey, number> = {
+    spend: t?.spend ?? 0,
+    revenue: t?.revenue ?? 0,
+    proceeds: t?.proceeds ?? 0,
+    profit: t?.net ?? 0,
+  };
+  const showChart = series.length >= 2 && view === "chart";
 
   return (
     <Panel title="Spend vs revenue" meta={meta}>
@@ -723,29 +765,45 @@ export function EconomicsOverlay({ days }: { days: number }) {
               </div>
             </div>
           )}
-          {series.length < 2 ? (
+          {!showChart ? (
             <div className="flex h-56 flex-col items-center justify-center gap-2">
               {visibleLines.length > 0 ? (
                 <p className="text-2xl font-semibold tabular-nums">
-                  {visibleLines.map((line, i) => (
-                    <span key={line.key}>
-                      {i > 0 && <span className="mx-2 text-zinc-600">·</span>}
-                      <span className={singleDayColor[line.key]}>
-                        {fmtMoney(Math.round(singleDay?.[line.key] ?? 0))}
+                  {visibleLines.map((line, i) => {
+                    const value =
+                      series.length < 2
+                        ? (singleDay?.[line.key] ?? 0)
+                        : rangeTotals[line.key];
+                    return (
+                      <span key={line.key}>
+                        {i > 0 && <span className="mx-2 text-zinc-600">·</span>}
+                        <span className={singleDayColor[line.key]}>
+                          {fmtMoney(Math.round(value))}
+                        </span>
                       </span>
-                    </span>
-                  ))}
+                    );
+                  })}
                 </p>
               ) : (
                 <p className="text-xs text-zinc-500">Select at least one line</p>
               )}
-              <p className="text-xs text-zinc-500">{singleDay?.date ?? "today"}</p>
-              <EcoLineToggles lines={lines} onToggle={toggleLine} />
+              <p className="text-xs text-zinc-500">
+                {series.length < 2
+                  ? (singleDay?.date ?? "today")
+                  : `${days}d total`}
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <EcoLineToggles lines={lines} onToggle={toggleLine} />
+                {series.length >= 2 && (
+                  <EcoViewToggle view={view} onChange={setView} />
+                )}
+              </div>
             </div>
           ) : (
             <>
-              <div className="mb-2">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <EcoLineToggles lines={lines} onToggle={toggleLine} />
+                <EcoViewToggle view={view} onChange={setView} />
               </div>
               <div className="relative h-56">
                 {visibleLines.length === 0 ? (

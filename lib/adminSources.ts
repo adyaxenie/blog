@@ -96,7 +96,9 @@ export async function fetchRcChart(name: string, fresh = false): Promise<RcChart
 
 export type RcOverviewMetric = { id: string; name: string; value: number; unit: string; description: string };
 
-export async function fetchRcOverview(fresh = false): Promise<RcOverviewMetric[]> {
+export type RcOverview = { currency: string | undefined; metrics: RcOverviewMetric[] };
+
+export async function fetchRcOverview(fresh = false): Promise<RcOverview> {
   const { apiKey, projectId } = rcEnv();
   const res = await fetch(`${RC_BASE}/projects/${projectId}/metrics/overview`, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -104,7 +106,7 @@ export async function fetchRcOverview(fresh = false): Promise<RcOverviewMetric[]
   });
   if (!res.ok) throw new Error(`RevenueCat overview failed (${res.status})`);
   const data = await res.json();
-  return data.metrics ?? [];
+  return { currency: data.currency, metrics: data.metrics ?? [] };
 }
 
 // Run a HogQL query against the PostHog project; returns raw result rows.

@@ -31,6 +31,7 @@ type ProjectionsData = {
 };
 
 const SCENARIOS = [1, 2, 5, 10] as const;
+type ScaleView = "runrate" | "eom";
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -42,6 +43,19 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
+/** UTC calendar progress for anchoring run-rate to the current month. */
+function utcMonthProgress(now = new Date()) {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const dayOfMonth = now.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return {
+    dayOfMonth,
+    daysInMonth,
+    remainingDays: Math.max(0, daysInMonth - dayOfMonth),
+  };
+}
+
 const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 const money = (v: number) => fmtMoney(Math.round(v));
 
@@ -49,34 +63,92 @@ function profitClass(v: number) {
   return v >= 0 ? "text-emerald-300" : "text-rose-300";
 }
 
+function ScaleViewToggle({
+  view,
+  onChange,
+}: {
+  view: ScaleView;
+  onChange: (view: ScaleView) => void;
+}) {
+  return (
+    <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
+      {(
+        [
+          { id: "runrate", label: "30d run rate" },
+          { id: "eom", label: "EOM projection" },
+        ] as const
+      ).map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          onClick={() => onChange(opt.id)}
+          className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+            view === opt.id
+              ? "bg-zinc-700 font-medium text-zinc-100"
+              : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ProjectionsTab() {
-  const { data, error, loading, retry } = useApi<ProjectionsData>("/api/admin/projections");
+  // Retries only kick in if the first fetch fails — other tabs stay single-shot.
+  const { data, error, loading, retry } = useApi<ProjectionsData>("/api/admin/projections", {
+    retries: 3,
+  });
   const [roasBasis, setRoasBasis] = useState<"7d" | "30d">("30d");
   const [spendOverride, setSpendOverride] = useState<string>("");
+  const [scaleView, setScaleView] = useState<ScaleView>("runrate");
 
   const basis = data?.basis;
   const dailySpendDefault = basis?.dailySpend7d ?? 0;
   const dailySpend = spendOverride === "" ? dailySpendDefault : Number(spendOverride) || 0;
   const roas = (roasBasis === "7d" ? basis?.roas7d : basis?.roas30d) ?? null;
   const appleRate = basis?.appleRate ?? 0.85;
+  const { dayOfMonth, daysInMonth, remainingDays } = useMemo(() => utcMonthProgress(), []);
+
+  const months = data?.months ?? [];
+  const current = months.find((m) => m.partial);
+  const mtdSpend = current?.spend ?? 0;
 
   const scenarios = useMemo(() => {
     if (roas == null) return [];
     return SCENARIOS.map((mult) => {
-      const spend = dailySpend * mult * 30;
-      const revenue = spend * roas;
-      const proceeds = revenue * appleRate;
-      const grossProfit = proceeds - spend;
+      const daily = dailySpend * mult;
+      // 30d run-rate P&L (fixed 30-day month).
+      const spend30 = daily * 30;
+      const revenue30 = spend30 * roas;
+      const proceeds30 = revenue30 * appleRate;
+      const profit30 = proceeds30 - spend30;
+      // EOM: actual MTD spend + remaining days at this daily rate.
+      const spendEom = mtdSpend + daily * remainingDays;
+      const revenueEom = spendEom * roas;
+      const proceedsEom = revenueEom * appleRate;
+      const profitEom = proceedsEom - spendEom;
       return {
         mult,
-        spend,
-        revenue,
-        proceeds,
-        grossProfit,
-        margin: spend > 0 ? grossProfit / spend : null,
+        daily,
+        runrate: {
+          spend: spend30,
+          revenue: revenue30,
+          proceeds: proceeds30,
+          grossProfit: profit30,
+          margin: spend30 > 0 ? profit30 / spend30 : null,
+        },
+        eom: {
+          spend: spendEom,
+          revenue: revenueEom,
+          proceeds: proceedsEom,
+          grossProfit: profitEom,
+          margin: spendEom > 0 ? profitEom / spendEom : null,
+        },
       };
     });
-  }, [dailySpend, roas, appleRate]);
+  }, [dailySpend, roas, appleRate, mtdSpend, remainingDays]);
 
   if (error || data?.error) {
     return (
@@ -91,7 +163,8 @@ export function ProjectionsTab() {
         </button>
       </div>
     );
-  }  if (loading || !data) {
+  }
+  if (loading || !data) {
     return (
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -105,8 +178,11 @@ export function ProjectionsTab() {
     );
   }
 
-  const months = data.months ?? [];
-  const current = months.find((m) => m.partial);
+  const pnl = scaleView === "runrate" ? "runrate" : "eom";
+  const panelMeta =
+    scaleView === "runrate"
+      ? `30-day months · revenue = spend × ${roasBasis} ROAS${roas != null ? ` (${roas.toFixed(2)}×)` : ""} · assumes ROAS holds at scale`
+      : `day ${dayOfMonth}/${daysInMonth} UTC · MTD spend ${money(mtdSpend)} + ${remainingDays}d left at scenario rate · revenue = EOM spend × ${roasBasis} ROAS`;
 
   return (
     <div className="space-y-4">
@@ -178,7 +254,10 @@ export function ProjectionsTab() {
                 <tr className="border-t border-zinc-800/60">
                   <td className="py-2 pr-3 text-zinc-400">Gross profit</td>
                   {months.map((m) => (
-                    <td key={m.month} className={`py-2 pl-4 text-right font-medium ${profitClass(m.grossProfit)}`}>
+                    <td
+                      key={m.month}
+                      className={`py-2 pl-4 text-right font-medium ${profitClass(m.grossProfit)}`}
+                    >
                       {money(m.grossProfit)}
                     </td>
                   ))}
@@ -205,11 +284,9 @@ export function ProjectionsTab() {
         )}
       </Panel>
 
-      <Panel
-        title="Spend scaling projections"
-        meta={`30-day months · revenue = spend × ${roasBasis} ROAS${roas != null ? ` (${roas.toFixed(2)}×)` : ""} · assumes ROAS holds at scale`}
-      >
+      <Panel title="Spend scaling projections" meta={panelMeta}>
         <div className="mb-4 flex flex-wrap items-center gap-4">
+          <ScaleViewToggle view={scaleView} onChange={setScaleView} />
           <label className="flex items-center gap-2 text-xs text-zinc-400">
             Daily spend
             <span className="flex items-center rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1">
@@ -272,23 +349,39 @@ export function ProjectionsTab() {
                   <td className="py-2 pr-3 text-zinc-400">Daily spend</td>
                   {scenarios.map((s) => (
                     <td key={s.mult} className="py-2 pl-4 text-right text-zinc-300">
-                      {fmtMoney2(dailySpend * s.mult)}
+                      {fmtMoney2(s.daily)}
                     </td>
                   ))}
                 </tr>
+                {scaleView === "eom" && (
+                  <tr className="border-t border-zinc-800/60">
+                    <td className="py-2 pr-3 text-zinc-400">Actual MTD spend</td>
+                    {scenarios.map((s) => (
+                      <td key={s.mult} className="py-2 pl-4 text-right text-zinc-500">
+                        {money(mtdSpend)}
+                      </td>
+                    ))}
+                  </tr>
+                )}
                 <tr className="border-t border-zinc-800/60">
-                  <td className="py-2 pr-3 text-zinc-400">Monthly ad spend</td>
+                  <td className="py-2 pr-3 text-zinc-400">
+                    {scaleView === "runrate"
+                      ? "Monthly ad spend (30d)"
+                      : `Projected EOM spend (${remainingDays}d left)`}
+                  </td>
                   {scenarios.map((s) => (
                     <td key={s.mult} className="py-2 pl-4 text-right text-rose-300">
-                      {money(s.spend)}
+                      {money(s[pnl].spend)}
                     </td>
                   ))}
                 </tr>
                 <tr className="border-t border-zinc-800/60">
-                  <td className="py-2 pr-3 text-zinc-400">Revenue (gross)</td>
+                  <td className="py-2 pr-3 text-zinc-400">
+                    {scaleView === "runrate" ? "Revenue (gross)" : "Projected EOM revenue"}
+                  </td>
                   {scenarios.map((s) => (
                     <td key={s.mult} className="py-2 pl-4 text-right text-zinc-100">
-                      {money(s.revenue)}
+                      {money(s[pnl].revenue)}
                     </td>
                   ))}
                 </tr>
@@ -296,15 +389,20 @@ export function ProjectionsTab() {
                   <td className="py-2 pr-3 text-zinc-400">After Apple 15%</td>
                   {scenarios.map((s) => (
                     <td key={s.mult} className="py-2 pl-4 text-right text-sky-300">
-                      {money(s.proceeds)}
+                      {money(s[pnl].proceeds)}
                     </td>
                   ))}
                 </tr>
                 <tr className="border-t border-zinc-800/60">
-                  <td className="py-2 pr-3 text-zinc-400">Gross profit / mo</td>
+                  <td className="py-2 pr-3 text-zinc-400">
+                    {scaleView === "runrate" ? "Gross profit / mo" : "Projected EOM profit"}
+                  </td>
                   {scenarios.map((s) => (
-                    <td key={s.mult} className={`py-2 pl-4 text-right font-medium ${profitClass(s.grossProfit)}`}>
-                      {money(s.grossProfit)}
+                    <td
+                      key={s.mult}
+                      className={`py-2 pl-4 text-right font-medium ${profitClass(s[pnl].grossProfit)}`}
+                    >
+                      {money(s[pnl].grossProfit)}
                     </td>
                   ))}
                 </tr>
@@ -312,7 +410,7 @@ export function ProjectionsTab() {
                   <td className="py-2 pr-3 text-zinc-400">Profit margin</td>
                   {scenarios.map((s) => (
                     <td key={s.mult} className="py-2 pl-4 text-right text-zinc-300">
-                      {pct(s.margin)}
+                      {pct(s[pnl].margin)}
                     </td>
                   ))}
                 </tr>
@@ -321,8 +419,9 @@ export function ProjectionsTab() {
           </div>
         )}
         <p className="mt-3 text-[10px] text-zinc-600">
-          Margin is constant across multipliers by construction — real ROAS typically decays as spend
-          scales, so treat ×5/×10 as upper bounds.
+          {scaleView === "eom"
+            ? "EOM keeps actual MTD spend fixed and applies the scenario rate only to remaining days. Revenue/profit use the selected ROAS on total EOM spend."
+            : "Margin is constant across multipliers by construction — real ROAS typically decays as spend scales, so treat ×5/×10 as upper bounds."}
         </p>
       </Panel>
     </div>

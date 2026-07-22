@@ -112,7 +112,7 @@ export async function GET(req: NextRequest) {
     // Blended CAC: last-28d spend / last-28d new customers (matched windows).
     let spend28d = 0;
     for (let i = 27; i >= 0; i--) spend28d += spendByDay.get(utcDate(i)) ?? 0;
-    const newCustomers28d = overview.find((m) => m.id === "new_customers")?.value ?? 0;
+    const newCustomers28d = overview.metrics.find((m) => m.id === "new_customers")?.value ?? 0;
 
     return NextResponse.json({
       configured: true,

@@ -1,93 +1,117 @@
 import { NextRequest, NextResponse } from "next/server";
-import { wantsFreshRefresh, upstreamCache } from "@/lib/adminSources";
+import {
+  ConfigError,
+  fetchRcChart,
+  fetchRcOverview,
+  pickDays,
+  round2,
+  wantsFreshRefresh,
+  type RcChartDay,
+} from "@/lib/adminSources";
 
 export const dynamic = "force-dynamic";
 
-const RC_BASE = "https://api.revenuecat.com/v2";
-const ALLOWED_DAYS = new Set([1, 7, 14, 30, 90]);
+// Unified RevenueCat pull for the dashboard and Claude: overview KPIs plus the
+// three charts we track (revenue, refund_rate, conversion_to_paying) in one GET.
+// Overview is core (its failure is a 502); each health chart degrades to null so
+// a single failing chart never blanks the whole response.
 
-type ChartValue = { cohort: number; incomplete: boolean; measure: number; value: number };
+function windowed(rows: RcChartDay[], days: number) {
+  return rows.slice(-days).map((r) => ({
+    date: r.date,
+    label: r.date.slice(5, 10),
+    incomplete: r.incomplete,
+    measures: r.measures,
+  }));
+}
 
 export async function GET(req: NextRequest) {
-  const apiKey = process.env.REVENUECAT_API_KEY;
-  const projectId = process.env.REVENUECAT_PROJECT_ID;
-  if (!apiKey || !projectId) {
-    return NextResponse.json({ configured: false, error: "REVENUECAT_API_KEY / REVENUECAT_PROJECT_ID not set" });
-  }
-
-  const daysParam = Number(req.nextUrl.searchParams.get("days"));
-  const days = ALLOWED_DAYS.has(daysParam) ? daysParam : 30;
+  const days = pickDays(req.nextUrl.searchParams.get("days"));
   const fresh = wantsFreshRefresh(req.nextUrl.searchParams);
 
-  const headers = { Authorization: `Bearer ${apiKey}` };
+  let overview: Awaited<ReturnType<typeof fetchRcOverview>>;
   try {
-    const [overviewRes, chartRes] = await Promise.all([
-      fetch(`${RC_BASE}/projects/${projectId}/metrics/overview`, {
-        headers,
-        ...upstreamCache(fresh, 300),
-      }),
-      fetch(`${RC_BASE}/projects/${projectId}/charts/revenue`, {
-        headers,
-        ...upstreamCache(fresh, 300),
-      }),
-    ]);
-
-    if (!overviewRes.ok) {
-      return NextResponse.json(
-        { configured: true, error: `RevenueCat overview failed (${overviewRes.status})` },
-        { status: 502 }
-      );
-    }
-
-    const overview = await overviewRes.json();
-
-    // charts/revenue: values are (cohort unix-seconds UTC, measure index, value) triples.
-    // Measure 0 = Revenue ($), 1 = Transactions (#). Daily resolution; we window
-    // to the requested range server-side.
-    let series: { date: string; label: string; revenue: number; transactions: number }[] = [];
-    let summary: { total: number; average: number } | null = null;
-    if (chartRes.ok) {
-      const chart = await chartRes.json();
-      const byDay = new Map<number, { revenue: number; transactions: number }>();
-      for (const v of (chart.values ?? []) as ChartValue[]) {
-        const entry = byDay.get(v.cohort) ?? { revenue: 0, transactions: 0 };
-        if (v.measure === 0) entry.revenue = v.value;
-        if (v.measure === 1) entry.transactions = v.value;
-        byDay.set(v.cohort, entry);
-      }
-      series = Array.from(byDay.entries())
-        .sort((a, b) => a[0] - b[0])
-        .map(([cohort, m]) => {
-          // toISOString is always UTC — no local timezone drift.
-          const iso = new Date(cohort * 1000).toISOString();
-          return {
-            date: iso.slice(0, 10),
-            label: iso.slice(5, 10),
-            revenue: Math.round(m.revenue * 100) / 100,
-            transactions: m.transactions,
-          };
-        })
-        .slice(-days);
-
-      const total = series.reduce((s, r) => s + r.revenue, 0);
-      summary = {
-        total: Math.round(total * 100) / 100,
-        average: series.length ? Math.round((total / series.length) * 100) / 100 : 0,
-      };
-    }
-
-    return NextResponse.json({
-      configured: true,
-      days,
-      currency: overview.currency,
-      metrics: overview.metrics,
-      revenueSeries: series,
-      revenueSummary: summary,
-    });
+    overview = await fetchRcOverview(fresh);
   } catch (e) {
+    if (e instanceof ConfigError) {
+      return NextResponse.json({ configured: false, error: e.message });
+    }
     return NextResponse.json(
-      { configured: true, error: `RevenueCat request failed: ${String(e)}` },
+      { configured: true, error: `RevenueCat overview failed: ${String(e)}` },
       { status: 502 }
     );
   }
+
+  const [revenueRes, refundRes, convRes] = await Promise.allSettled([
+    fetchRcChart("revenue", fresh),
+    fetchRcChart("refund_rate", fresh),
+    fetchRcChart("conversion_to_paying", fresh),
+  ]);
+
+  // revenue measures: 0 revenue ($), 1 transactions (#)
+  let revenueSeries: { date: string; label: string; revenue: number; transactions: number }[] = [];
+  let revenueSummary: { total: number; average: number } | null = null;
+  if (revenueRes.status === "fulfilled" && revenueRes.value.length) {
+    const rows = windowed(revenueRes.value, days);
+    revenueSeries = rows.map((r) => ({
+      date: r.date,
+      label: r.label,
+      revenue: round2(r.measures[0] ?? 0),
+      transactions: r.measures[1] ?? 0,
+    }));
+    const total = revenueSeries.reduce((s, r) => s + r.revenue, 0);
+    revenueSummary = {
+      total: round2(total),
+      average: revenueSeries.length ? round2(total / revenueSeries.length) : 0,
+    };
+  }
+
+  // refund_rate measures: 0 transactions, 1 refunded, 2 refund rate %
+  let refunds = null;
+  if (refundRes.status === "fulfilled" && refundRes.value.length) {
+    const rows = windowed(refundRes.value, days);
+    const totalTx = rows.reduce((s, r) => s + (r.measures[0] ?? 0), 0);
+    const totalRefunded = rows.reduce((s, r) => s + (r.measures[1] ?? 0), 0);
+    refunds = {
+      series: rows.map((r) => ({
+        date: r.date,
+        label: r.label,
+        transactions: r.measures[0] ?? 0,
+        refunded: r.measures[1] ?? 0,
+        rate: round2(r.measures[2] ?? 0),
+      })),
+      totalRefunded,
+      overallRate: totalTx > 0 ? round2((totalRefunded / totalTx) * 100) : null,
+    };
+  }
+
+  // conversion_to_paying measures: 0 new customers, 1 paying within 7d, 2 rate %
+  let conversion = null;
+  if (convRes.status === "fulfilled" && convRes.value.length) {
+    const rows = windowed(convRes.value, days);
+    const totalNew = rows.reduce((s, r) => s + (r.measures[0] ?? 0), 0);
+    const totalPaying = rows.reduce((s, r) => s + (r.measures[1] ?? 0), 0);
+    conversion = {
+      series: rows.map((r) => ({
+        date: r.date,
+        label: r.label,
+        newCustomers: r.measures[0] ?? 0,
+        paying: r.measures[1] ?? 0,
+        rate: round2(r.measures[2] ?? 0),
+      })),
+      totalPaying,
+      overallRate: totalNew > 0 ? round2((totalPaying / totalNew) * 100) : null,
+    };
+  }
+
+  return NextResponse.json({
+    configured: true,
+    days,
+    currency: overview.currency,
+    metrics: overview.metrics,
+    revenueSeries,
+    revenueSummary,
+    refunds,
+    conversion,
+  });
 }

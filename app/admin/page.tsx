@@ -108,16 +108,6 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [days, setDays] = useState<number>(30);
   const [tab, setTab] = useState<TabId>("overview");
-  // Defer heavy tabs until first open so they don't stampede Supermetrics with
-  // Overview. Once visited they stay mounted (hidden) so Refresh still updates them.
-  const [visited, setVisited] = useState<Partial<Record<TabId, boolean>>>({
-    overview: true,
-  });
-
-  function selectTab(next: TabId) {
-    setTab(next);
-    setVisited((v) => (v[next] ? v : { ...v, [next]: true }));
-  }
 
   async function logout() {
     await fetch("/api/admin/logout", { method: "POST" });
@@ -132,7 +122,7 @@ export default function AdminDashboard() {
           <div className="min-w-0 flex-1 space-y-4">
             <DashboardHeader
               tab={tab}
-              setTab={selectTab}
+              setTab={setTab}
               days={days}
               setDays={setDays}
               onLogout={logout}
@@ -157,17 +147,13 @@ export default function AdminDashboard() {
               <RcHealthPanels days={days} />
             </div>
 
-            {visited.tiktok && (
-              <div className={tab === "tiktok" ? "space-y-4" : "hidden"}>
-                <TikTokAdsTab days={days} />
-              </div>
-            )}
+            <div className={tab === "tiktok" ? "space-y-4" : "hidden"}>
+              <TikTokAdsTab days={days} />
+            </div>
 
-            {visited.projections && (
-              <div className={tab === "projections" ? "space-y-4" : "hidden"}>
-                <ProjectionsTab />
-              </div>
-            )}
+            <div className={tab === "projections" ? "space-y-4" : "hidden"}>
+              <ProjectionsTab />
+            </div>
           </div>
 
           <WorkSidebar days={days} />

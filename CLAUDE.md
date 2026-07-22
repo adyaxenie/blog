@@ -60,10 +60,13 @@ Authorization: Bearer $TODO_API_KEY
 | TikTok overview | `{DASHBOARD_URL}/api/admin/tiktok?days=7` |
 | TikTok creatives (main) | `{DASHBOARD_URL}/api/admin/tiktok-creatives?days=7` |
 | Economics / spend | `{DASHBOARD_URL}/api/admin/economics?days=7` |
+| RevenueCat (all) | `{DASHBOARD_URL}/api/admin/revenuecat?days=7` |
 | Daily brief | `{DASHBOARD_URL}/api/admin/brief` |
 | Current workspace | `{DASHBOARD_URL}/api/admin/workspace` |
 
 Use `days=1`, `7`, `14`, or `30` as needed.
+
+The RevenueCat pull returns everything we track in one response: overview `metrics` (KPIs), `revenueSeries` + `revenueSummary`, `refunds` (refund rate), and `conversion` (conversion-to-paying). No need to hit `api.revenuecat.com` directly.
 
 ## 2. Push todos, actions, formats
 
